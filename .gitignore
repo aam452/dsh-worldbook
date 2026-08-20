@@ -1,8 +1,26 @@
+# 依赖与构建产物
 node_modules/
 lib/
+
+# 运行时数据（SQLite 世界书库等）
 data/
+
+# 日志
 *.log
+
+# 系统 / 编辑器
 .DS_Store
-temp/*.jsonl
-temp/注入*
-temp/wb-css.txt
+Thumbs.db
+.vscode/
+.idea/
+
+# 临时文件
+temp/
+
+# 浏览器自动化临时产物
+.playwright-mcp/
+
+# 第三方参考源码（下载自其它仓库，仅本地参考，不入库）
+参考文献/
+docs/cocktail-main/
+docs/cocktail-plus-main/

@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as worldbook from '../data/worldbook.js'
 import * as setting from '../data/setting.js'
+import { lastCompatReport } from '../compat.js'
 
 const PREFIX = '/api/worldbook'
 
@@ -36,6 +37,11 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
   const seg = pathname.slice(PREFIX.length).split('/').filter(Boolean)
   const method = (req.method ?? 'GET').toUpperCase()
+
+  // GET /compat → 最近一次重复注入检测结果
+  if (seg[0] === 'compat' && method === 'GET') {
+    return ok(res, lastCompatReport())
+  }
 
   // 世界书（全局共享，不绑会话；作用域随插件工作区生效范围）
   if (seg[0] === 'worldbooks') {
@@ -94,17 +100,18 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const page = Math.max(1, Number(qs.get('page')) || 1)
       const pageSize = Math.min(200, Math.max(1, Number(qs.get('pageSize')) || 50))
       const all = worldbook.entries(seg[1])
-      const rows = all
-        .map((row, i) => ({ row, rowid: i }))
-        .filter(({ row }) => {
+      // 先一次性解析为视图，再筛选/排序，避免比较器里反复 parseJson（条目多时 O(n log n) 次解析会卡）
+      const views = all.map(worldbook.toEntryView)
+      const rows = views
+        .map((v, i) => ({ v, rowid: i }))
+        .filter(({ v }) => {
           if (!q) return true
-          const v = worldbook.toEntryView(row)
           const hay = [v.comment ?? '', v.content, ...v.keys, ...v.keysecondary].join('\n').toLowerCase()
           return hay.includes(q.toLowerCase())
         })
         .sort((a, b) => {
-          const va = worldbook.toEntryView(a.row)
-          const vb = worldbook.toEntryView(b.row)
+          const va = a.v
+          const vb = b.v
           const sign = order === 'desc' ? -1 : 1
           let cmp = 0
           switch (sort) {
@@ -125,13 +132,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
           }
           return cmp === 0 ? sign * (va.insertionOrder - vb.insertionOrder) : sign * cmp
         })
-        .map(({ row }) => row)
       const total = rows.length
       const paged = rows.slice((page - 1) * pageSize, page * pageSize)
-      const items = paged.map((row, i) => ({
-        ...worldbook.toEntryItem(row),
-        uid: (page - 1) * pageSize + i,
-      }))
+      const items = paged.map(({ v }, i) => {
+        const keysNote = v.keys.length > 0 ? v.keys.join('、') : '(无触发词)'
+        const stateName = v.constant ? '常驻' : v.vectorized ? '向量' : v.enabled ? '普通' : '禁用'
+        return {
+          ...v,
+          digest: `${keysNote} [${stateName}] ${v.content.slice(0, 120)}`,
+          uid: (page - 1) * pageSize + i,
+        }
+      })
       return ok(res, { total, page, pageSize, items })
     }
     // POST /worldbooks/:id/entries { entry?: {...} } → 在末尾新增一条（无 JSON 时插入空条目）
@@ -176,7 +187,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     }
   }
 
-  // 设置（插件启用开关 + 工作区作用域）
+  // 设置（插件启用开关 + 工作区作用域 + 主题 + 开发模式）
   if (seg[0] === 'settings') {
     if (method === 'GET') return ok(res, settingAll())
     if (method === 'PUT') {
@@ -185,6 +196,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         if (key === 'enabled') setting.setEnabled(value === true || value === 'true')
         else if (key === 'workspaceMode') setting.setWorkspaceScope(value === 'selected' ? 'selected' : 'all', setting.workspaceIds())
         else if (key === 'workspaceIds') setting.setWorkspaceScope(setting.workspaceMode(), Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') : [])
+        else if (key === 'theme') setting.setTheme(typeof value === 'string' ? value : 'dsh')
+        else if (key === 'injectMode') setting.setInjectMode(value === 'per-turn' ? 'per-turn' : 'every-step')
+        else if (key === 'devMode') setting.setDevMode(value === true || value === 'true')
+        else if (key === 'devAction') setting.setDevAction(value === 'edit' ? 'edit' : 'create')
+        else if (key === 'devBookId') setting.setDevBookId(typeof value === 'string' ? value : '')
+        else if (key === 'devEntryIds') setting.setDevEntryIds(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') : [])
+        else if (key === 'devPerms') setting.setDevPerms(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') as setting.DevPerm[] : [])
       }
       return ok(res, settingAll())
     }
@@ -199,6 +217,13 @@ function settingAll(): Record<string, string> {
     enabled: setting.enabled() ? 'true' : 'false',
     workspaceMode: setting.workspaceMode(),
     workspaceIds: s.workspaceIds ?? '[]',
+    theme: setting.theme(),
+    injectMode: setting.injectMode(),
+    devMode: setting.devMode() ? 'true' : 'false',
+    devAction: setting.devAction(),
+    devBookId: setting.devBookId(),
+    devEntryIds: JSON.stringify(setting.devEntryIds()),
+    devPerms: JSON.stringify(setting.devPerms()),
   }
 }
 

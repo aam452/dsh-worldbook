@@ -148,18 +148,21 @@ const world = renderWorldbookInjection(textLines, { cursor })
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/settings` | `{ enabled, workspaceMode, workspaceIds }` |
-| PUT | `/settings` | 更新 `{ enabled?\|workspaceMode?\|workspaceIds? }` |
+| GET | `/settings` | `{ enabled, workspaceMode, workspaceIds, theme, injectMode, devMode, devAction, devBookId, devEntryIds, devPerms }` |
+| PUT | `/settings` | 更新 `{ enabled?\|workspaceMode?\|workspaceIds?\|theme?\|injectMode?\|devMode?\|devAction?\|devBookId?\|devEntryIds?\|devPerms? }` |
 
 ## 六、槽位契约（集成指南）
+
+本插件提供**两处可集成的 UI**：世界书管理页与插件设置卡片。管理页由两个槽渲染同一份内容，集成方选一个位置挂载即可；设置卡片是独立一个槽。
 
 ### 6.1 本插件声明的槽位
 
 | 槽位 | kind | scope | 说明 |
 | --- | --- | --- | --- |
-| `settings.section`（id: `worldbook`） | list | root | 插件**独立存在**时，管理页出现在 dsh 设置侧边栏 |
-| `mindlink.worldbook.nav` | single | root | 宿主「世界书」导航位渲染本插件页面 |
-| `mindlink.worldbook.settings` | single | root | 宿主设置页内嵌本插件卡片 |
+| `settings.section`（id: `worldbook`） | list | root | 插件**独立存在**时，世界书管理页出现在 dsh 设置侧边栏 |
+| `mindlink.worldbook.nav` | single | root | 世界书管理页（完整页面，含列表、新建、导入导出、编辑） |
+| `mindlink.worldbook.settings` | single | root | 世界书管理页（宿主设置页位置，渲染内容与 `nav` 相同，二选一挂载） |
+| `mindlink.worldbook.settings-card` | single | root | 插件设置卡片（启用开关、作用域、主题、注入时机、开发模式；内嵌、就地修改不弹窗） |
 | `worldbook.host.present` | single | root | **宿主在线握手**：宿主集成后注册，通知本插件隐藏 dsh 设置分区 |
 
 所有自定义槽由本插件在 `shell.overlay`（list/root，additive）注册时通过 `children` 声明，**常驻不注销**——保证它们不随 `settings.section` 的动态注销而塌缩。
@@ -170,52 +173,22 @@ const world = renderWorldbookInjection(textLines, { cursor })
 - 检测到 `worldbook.host.present` 有条目（宿主在线）→ 注销 `settings.section`，世界书 UI 只在宿主位置，dsh 设置无重复分区。
 - 宿主停用（dsh 插件级停用，client 半不加载）→ `worldbook.host.present` 无条目 → 恢复 `settings.section`。
 
-集成方只需：集成本插件 UI 时，`register` 到 `worldbook.host.present`（返回的 disposer 在停用时调用即可）。
+集成方只需：集成本插件 UI 时，注册到 `worldbook.host.present`（注册返回的 disposer 在停用时调用即可）。本插件据此决定是否保留自己的 dsh 设置分区。
 
-### 6.3 集成方三步
+### 6.3 集成方对接
 
-1. **监听**：`slots.subscribe('mindlink.worldbook.nav', sync)`，读到本插件注册条目。
-2. **读取组件**：`slots.entriesOfSlot('mindlink.worldbook.nav')` → 取 `[0].component`。
-3. **渲染**：用 React `createElement(component)` 渲染到你的位置；同时 `register` 到 `worldbook.host.present` 完成握手。
+对接分四步，全部走 dsh 的 `slots` 服务：
 
-```ts
-// 宿主插件 client 半
-import { createElement as h } from 'react'
+1. **订阅槽**：监听 `mindlink.worldbook.nav`（或 `mindlink.worldbook.settings`）与 `mindlink.worldbook.settings-card` 是否有注册条目，本插件加载/卸载时同步。
+2. **读取组件**：从对应槽的条目里取出组件引用；没有条目说明世界书插件未安装或未加载。
+3. **渲染**：用 React 把组件渲染到你的位置；同时注册 `worldbook.host.present` 完成握手。
+4. **卸载**：组件卸载时，注销订阅返回的 disposer 与握手注册返回的 disposer。
 
-export const inject = ['slots']
-
-export function apply(ctx: { slots?: any }) {
-  const slots = ctx.slots
-  if (!slots) return
-
-  // 1. 订阅：世界书插件加载/卸载时同步
-  const update = () => {
-    const entries = slots.entriesOfSlot('mindlink.worldbook.nav')
-    setWorldbookEntry(entries[0]?.component ?? null)
-  }
-  update()
-  const unsub = slots.subscribe('mindlink.worldbook.nav', update)
-
-  // 2. 宿主在线握手：告诉世界书插件「我在用你的 UI」
-  let present: (() => void) | null = null
-  const syncPresent = () => {
-    if (getWorldbookEntry() && !present) {
-      present = slots.register({ name: 'worldbook.host.present', priority: 0 }, () => null)
-    } else if (!getWorldbookEntry() && present) {
-      present(); present = null
-    }
-  }
-  syncPresent()
-
-  return () => { unsub?.(); present?.() }
-}
-
-// 3. 渲染到你的位置；无世界书插件时用宿主兜底
-function MyPanel() {
-  const WorldbookComponent = getWorldbookEntry()
-  return WorldbookComponent ? h(WorldbookComponent) : h('div', null, '未安装世界书插件')
-}
-```
+要点：
+- 管理页两个槽（`nav` / `settings`）渲染同一份内容，**只挂载其中一个**；设置卡片（`settings-card`）单独挂载到设置页。
+- 槽条目变化要**订阅监听**，不要假设加载顺序；未读到条目时可按需回退到你自己的兜底界面。
+- 槽里的组件必须返回 React 元素。
+- 若宿主不需要本插件 UI，可只用 REST API 或 `renderWorldbookInjection`（见第三/四/五章），完全脱离槽位。
 
 ### 6.4 集成约束
 

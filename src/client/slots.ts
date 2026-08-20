@@ -29,6 +29,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'root'
       owner: {}
     }
+    'mindlink.worldbook.settings-card': {
+      kind: 'single'
+      scope: 'root'
+      owner: {}
+    }
     'worldbook.host.present': {
       kind: 'single'
       scope: 'root'

@@ -3,9 +3,33 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, PointerEvent as RPointerEvent } from 'react'
 import { api, changed, onChanged } from './api'
 import type { ApiErr } from './api'
+import { showConfirm, showAlert } from './wb-confirm.tsx'
+import { WorldbookSettingsDialog } from './worldbook-settings.tsx'
+import type { WorkspacesService } from './worldbook-settings.tsx'
 
 function errText(e: unknown): string {
   return e && typeof e === 'object' && 'message' in e ? String((e as ApiErr).message) : String(e)
+}
+
+// ── 世界书选中记忆：退出页面再进入时恢复上次选中的世界书 ──
+const SELECTED_BOOK_CACHE_KEY = 'dsh-worldbook-selected-book'
+
+function readSelectedBookCache(): string | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(SELECTED_BOOK_CACHE_KEY) : null
+  } catch {
+    return null
+  }
+}
+
+function writeSelectedBookCache(id: string | null): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    if (id === null) localStorage.removeItem(SELECTED_BOOK_CACHE_KEY)
+    else localStorage.setItem(SELECTED_BOOK_CACHE_KEY, id)
+  } catch {
+    // 缓存不可写时忽略
+  }
 }
 
 // ── 通用 hooks ──
@@ -79,16 +103,20 @@ interface StWorldBook {
   entryCount: number
 }
 
+// 位置选项（对齐 SillyTavern 编辑器的位置下拉：角色定义/示例消息/作者注释前后、@D 系统/用户/AI、锚点）
 const POSITION_OPTIONS = [
-  { value: 0, label: '↑Char' },
-  { value: 1, label: '↓Char' },
-  { value: 5, label: '↑EM' },
-  { value: 6, label: '↓EM' },
-  { value: 2, label: '↑AN' },
-  { value: 3, label: '↓AN' },
-  { value: 4, label: '@D' },
-  { value: 7, label: 'Outlet' },
+  { value: 0, role: null, label: '角色定义前 ↑Char' },
+  { value: 1, role: null, label: '角色定义后 ↓Char' },
+  { value: 5, role: null, label: '示例消息前 ↑EM' },
+  { value: 6, role: null, label: '示例消息后 ↓EM' },
+  { value: 2, role: null, label: '作者注释前 ↑AN' },
+  { value: 3, role: null, label: '作者注释后 ↓AN' },
+  { value: 4, role: 0, label: '系统 @D ⚙️' },
+  { value: 4, role: 1, label: '用户 @D 👤' },
+  { value: 4, role: 2, label: 'AI @D 🤖' },
+  { value: 7, role: null, label: '锚点 ➡️ Outlet' },
 ]
+const AT_DEPTH_POSITION = 4
 
 const LOGIC_OPTIONS = [
   { value: 0, label: 'AND ANY' },
@@ -119,14 +147,18 @@ const SORT_OPTIONS = [
 // 需要方向切换的排序（custom 不显示方向按钮）
 const SORT_HAS_DIRECTION = ['priority', 'comment', 'content', 'depth', 'order', 'uid', 'probability']
 
-function WorldbooksPage() {
+function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
   const [books, , reload] = useData<StWorldBook[]>(() => api('/worldbooks'))
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(() => readSelectedBookCache())
   const [msg, setMsg] = useState('')
   const [creating, setCreating] = useState(false)
   const [onlyEnabled, setOnlyEnabled] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const bookList = (books ?? []).filter((b) => !onlyEnabled || b.enabled)
   const selected = bookList.find((b) => b.id === selectedId) ?? null
+
+  // 选中变化即写缓存，下次进入页面恢复
+  useEffect(() => { writeSelectedBookCache(selectedId) }, [selectedId])
 
   const toggleSelect = (id: string) => setSelectedId((prev) => (prev === id ? null : id))
 
@@ -148,7 +180,8 @@ function WorldbooksPage() {
   }
 
   async function doDelete(book: StWorldBook) {
-    if (!confirm(`确定删除世界书「${book.name}」？其下 ${book.entryCount} 条条目将一并删除。`)) return
+    const ok = await showConfirm({ title: '删除世界书', message: `确定删除世界书「${book.name}」？其下 ${book.entryCount} 条条目将一并删除。`, danger: true, confirmText: '删除' })
+    if (!ok) return
     api(`/worldbooks/${book.id}`, { method: 'DELETE' }).then(() => {
       setMsg('已删除')
       if (selectedId === book.id) setSelectedId(null)
@@ -162,6 +195,7 @@ function WorldbooksPage() {
       h('div', { className: 'wb-card-hd' },
         '世界书',
         h('span', { style: { flex: 1 } }),
+        h('button', { className: 'wb-btn', title: '插件设置：主题、启用开关、生效工作区、开发模式', onClick: () => setShowSettings(true) }, '⚙ 设置'),
         h('button', { className: 'wb-btn' + (onlyEnabled ? ' active' : ''), title: onlyEnabled ? '显示全部世界书' : '只显示已启用的世界书', onClick: () => { setOnlyEnabled(!onlyEnabled); setSelectedId(null) } }, onlyEnabled ? '已启用 ✓' : '只看已启用'),
         h('button', { className: 'wb-btn primary', onClick: () => setCreating(true), disabled: creating }, '＋ 新建世界书'),
         h('button', { className: 'wb-btn', disabled: !selected, onClick: () => selected && downloadWorldbook(selected) }, '导出'),
@@ -192,7 +226,7 @@ function WorldbooksPage() {
                 className: 'wb-switch' + (book.enabled ? '' : ' off'), title: '启用/停用',
                 onClick: (e) => {
                   e.stopPropagation()
-                  api(`/worldbooks/${book.id}`, { method: 'PUT', body: JSON.stringify({ enabled: !book.enabled }) }).then(refresh).catch((err) => alert((err as Error).message))
+                  api(`/worldbooks/${book.id}`, { method: 'PUT', body: JSON.stringify({ enabled: !book.enabled }) }).then(refresh).catch((err) => { void showAlert({ title: '操作失败', message: (err as Error).message }) })
                 },
               }, undefined),
               h('button', { className: 'wb-btn danger', onClick: (e) => { e.stopPropagation(); doDelete(book) } }, '删除'),
@@ -211,6 +245,7 @@ function WorldbooksPage() {
       ),
     msg ? h('div', { className: 'wb-hint' }, msg) : null,
     creating ? h(NewWorldbookModal, { onConfirm: handleCreated, onClose: () => setCreating(false) }) : null,
+    showSettings ? h(WorldbookSettingsDialog, { workspaces, onClose: () => setShowSettings(false) }) : null,
   )
 }
 
@@ -249,7 +284,7 @@ function downloadWorldbook(book: StWorldBook) {
     a.download = `${book.name || 'worldbook'}-${Date.now()}.json`
     a.click()
     URL.revokeObjectURL(a.href)
-  }).catch((e) => alert((e as Error).message))
+  }).catch((e) => { void showAlert({ title: '导出失败', message: (e as Error).message }) })
 }
 
 function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: () => void, onSelect: (id: string) => void) {
@@ -266,7 +301,7 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
       const list = (await api<StWorldBook[]>('/worldbooks')) ?? []
       const existing = fileName ? list.find((b) => b.name === fileName) : undefined
       if (existing) {
-        const ok = confirm(`已存在世界书「${fileName}」，是否更新该世界书？（将覆盖其全部条目）`)
+        const ok = await showConfirm({ title: '更新世界书', message: `已存在世界书「${fileName}」，是否更新该世界书？（将覆盖其全部条目）`, danger: true, confirmText: '更新' })
         if (!ok) return
         const res = await fetch(`/api/worldbook/worldbooks/${existing.id}/import`, {
           method: 'POST',
@@ -291,7 +326,7 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
       }
       onDone()
     } catch (err) {
-      alert('导入失败：' + (err as Error).message)
+      await showAlert({ title: '导入失败', message: (err as Error).message })
     }
   }
   reader.readAsText(file)
@@ -301,9 +336,9 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
 function blankEntry(): StWorldEntry {
   return {
     id: '', comment: '', content: '', keys: [], keysecondary: [], constant: false, vectorized: false,
-    selective: true, selectiveLogic: 0, insertionOrder: 100, position: 0, enabled: true, priority: null,
+    selective: false, selectiveLogic: 0, insertionOrder: 100, position: 0, enabled: true, priority: null,
     caseSensitive: null, matchWholeWords: null, scanDepth: null, useGroupScoring: null,
-    excludeRecursion: false, preventRecursion: false, delayUntilRecursion: false, probability: 100,
+    excludeRecursion: true, preventRecursion: false, delayUntilRecursion: false, probability: 100,
     useProbability: true, depth: 4, outletName: '', group: '', groupOverride: false, groupWeight: 100,
     sticky: null, cooldown: null, delay: null, automationId: '', role: null, triggers: [],
     characterFilter: { isExclude: false, names: [], tags: [] },
@@ -319,6 +354,7 @@ function blankEntry(): StWorldEntry {
 function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
   const [name, setName] = useState(props.book.name)
   const [entries, setEntries] = useState<StWorldEntry[] | null>(null)
+  const [entriesLoading, setEntriesLoading] = useState(false)
   const [total, setTotal] = useState(0)
   const [msg, setMsg] = useState('')
   const [editingEntry, setEditingEntry] = useState<StWorldEntry | null>(null)
@@ -344,6 +380,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
   }
 
   const reloadEntries = useCallback(() => {
+    setEntriesLoading(true)
     const params = new URLSearchParams()
     if (query.trim()) params.set('q', query.trim())
     params.set('sort', sortKey)
@@ -358,6 +395,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
         setTotal(data?.total ?? (data?.items?.length ?? 0))
       })
       .catch((e) => { setEntries([]); setMsg('加载条目失败：' + (e as Error).message) })
+      .finally(() => setEntriesLoading(false))
   }, [props.book.id, query, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => { setMsg(''); reloadEntries() }, [reloadEntries])
@@ -419,7 +457,8 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
   }
 
   async function deleteEntry(id: string) {
-    if (!confirm('确定删除这条条目？')) return
+    const ok = await showConfirm({ title: '删除条目', message: '确定删除这条条目？', danger: true, confirmText: '删除' })
+    if (!ok) return
     try {
       await api(`/worldbooks/${props.book.id}/entries/${id}`, { method: 'DELETE' })
       setEditingEntry(null); setMsg('条目已删除'); changed(); reloadEntries()
@@ -487,47 +526,49 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
         h('button', { className: 'wb-btn primary', style: { flex: 'none' }, onClick: () => { setEditingEntry(blankEntry()); setIsNew(true) } }, '＋ 新增条目'),
       ),
       h('div', { className: 'wb-actions', style: { justifyContent: 'space-between' } },
-        h('div', { className: 'wb-hint', style: { fontWeight: 700, color: '#d85b87' } }, `条目 · ${total}${query.trim() ? '（含搜索）' : ''}${sortKey === 'custom' ? ' · 可拖动 ⋮⋮ 调整自定义顺序' : ''}`),
+        h('div', { className: 'wb-hint', style: { fontWeight: 700, color: 'var(--ml-pink-6)' } }, `条目 · ${total}${query.trim() ? '（含搜索）' : ''}${sortKey === 'custom' ? ' · 可拖动 ⋮⋮ 调整自定义顺序' : ''}`),
       ),
-      entries === null
-        ? h('div', { className: 'wb-hint' }, '加载中…')
-        : !entries || entries.length === 0
-          ? h('div', { className: 'wb-hint' }, '暂无条目，点「＋ 新增条目」创建，或对书本「导入」ST JSON。')
-          : entries.map((en) =>
-            h('div', {
-              key: en.id,
-              className: 'wb-row' + (dragging === en.id ? ' wb-row-dragging' : ''),
-              style: { padding: '8px 12px' },
-              draggable: false,
-            },
-              // 自定义排序：仅三条杠可拖（避免与滚动/点击冲突）
-              sortKey === 'custom'
-                ? h('span', {
-                  className: 'wbed-grip' + (dragging === en.id ? ' active' : ''),
-                  draggable: true, title: '拖动调整自定义顺序',
-                  onDragStart: (e) => { setDragging(en.id); (e as unknown as { dataTransfer: DataTransfer }).dataTransfer.effectAllowed = 'move' },
-                  onDragEnd: () => setDragging(null),
-                  onDragOver: (e) => e.preventDefault(),
-                  onDrop: (e) => { e.preventDefault(); if (dragging) doReorder(dragging, en.id) },
-                }, '⋮⋮')
-                : null,
-              h('div', { style: { flex: 1, minWidth: 0, cursor: 'pointer' }, onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } },
-                h('div', { className: 'wb-name' }, (en.comment || '（无标题）')),
-                h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } },
-                  `${stateName(en)} · 顺序 ${en.insertionOrder} · ${en.keys.length ? en.keys.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
+      h('div', { className: 'wb-entries' + (entriesLoading ? ' wb-entries-loading' : '') },
+        entries === null
+          ? h('div', { className: 'wb-hint' }, '加载中…')
+          : !entries || entries.length === 0
+            ? h('div', { className: 'wb-hint' }, '暂无条目，点「＋ 新增条目」创建，或对书本「导入」ST JSON。')
+            : entries.map((en) =>
+              h('div', {
+                key: en.id,
+                className: 'wb-row' + (dragging === en.id ? ' wb-row-dragging' : ''),
+                style: { padding: '8px 12px' },
+                draggable: false,
+              },
+                // 自定义排序：仅三条杠可拖（避免与滚动/点击冲突）
+                sortKey === 'custom'
+                  ? h('span', {
+                    className: 'wbed-grip' + (dragging === en.id ? ' active' : ''),
+                    draggable: true, title: '拖动调整自定义顺序',
+                    onDragStart: (e) => { setDragging(en.id); (e as unknown as { dataTransfer: DataTransfer }).dataTransfer.effectAllowed = 'move' },
+                    onDragEnd: () => setDragging(null),
+                    onDragOver: (e) => e.preventDefault(),
+                    onDrop: (e) => { e.preventDefault(); if (dragging) doReorder(dragging, en.id) },
+                  }, '⋮⋮')
+                  : null,
+                h('div', { style: { flex: 1, minWidth: 0, cursor: 'pointer' }, onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } },
+                  h('div', { className: 'wb-name' }, (en.comment || '（无标题）')),
+                  h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } },
+                    `${stateName(en)} · 顺序 ${en.insertionOrder} · ${en.keys.length ? en.keys.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
+                ),
+                h('button', {
+                  className: 'wb-btn' + (en.enabled ? '' : ' muted'),
+                  style: en.enabled
+                    ? { color: 'var(--dsw-alias-state-success-primary)', borderColor: 'var(--dsw-alias-state-success-tertiary)', background: 'var(--dsw-alias-state-success-tertiary)' }
+                    : { color: 'var(--ml-ink-3)', borderColor: 'var(--ml-line)' },
+                  title: '点击切换启用/停用',
+                  onClick: () => toggleEntryEnabled(en),
+                }, en.enabled ? '✓ 已启用' : '○ 未启用'),
+                h('button', { className: 'wb-btn', onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } }, '编辑'),
+                h('button', { className: 'wb-btn danger', onClick: () => deleteEntry(en.id) }, '删除'),
               ),
-              h('button', {
-                className: 'wb-btn' + (en.enabled ? '' : ' muted'),
-                style: en.enabled
-                  ? { color: '#2f9e63', borderColor: '#b8e0c8', background: '#eefaf3' }
-                  : { color: '#a88896', borderColor: 'var(--ml-line)' },
-                title: '点击切换启用/停用',
-                onClick: () => toggleEntryEnabled(en),
-              }, en.enabled ? '✓ 已启用' : '○ 未启用'),
-              h('button', { className: 'wb-btn', onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } }, '编辑'),
-              h('button', { className: 'wb-btn danger', onClick: () => deleteEntry(en.id) }, '删除'),
             ),
-          ),
+      ),
     ),
     editingEntry ? h(EntryEditorModal, {
       entry: editingEntry, isNew, onChange: patchEntry, onSave: saveEntry,
@@ -582,13 +623,27 @@ function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange
             ),
             h('div', { className: 'wbed-field wbed-num' },
               h('label', { className: 'wbed-label' }, '位置'),
-              h('select', { className: 'wbed-select', value: String(en.position), onChange: (e: { target: { value: string } }) => set({ position: Number(e.target.value) }) },
-                POSITION_OPTIONS.map((o) => h('option', { key: o.value, value: String(o.value) }, o.label)),
+              h('select', {
+                className: 'wbed-select',
+                value: en.position === AT_DEPTH_POSITION ? `${AT_DEPTH_POSITION}:${en.role ?? 0}` : `${en.position}:`,
+                onChange: (e: { target: { value: string } }) => {
+                  const [pStr, rStr] = e.target.value.split(':')
+                  const position = Number(pStr)
+                  set({ position, role: position === AT_DEPTH_POSITION ? (rStr === undefined ? 0 : Number(rStr)) : null })
+                },
+              },
+                POSITION_OPTIONS.map((o) => h('option', { key: `${o.value}:${o.role ?? ''}`, value: `${o.value}:${o.role ?? ''}` }, o.label)),
               ),
             ),
             h('div', { className: 'wbed-field wbed-num' },
               h('label', { className: 'wbed-label' }, '深度'),
-              h('input', { className: 'wbed-input', type: 'number', value: en.scanDepth === null ? '' : String(en.scanDepth), onChange: (e) => set({ scanDepth: e.target.value === '' ? null : Number(e.target.value) }) }),
+              h('input', {
+                className: 'wbed-input', type: 'number', min: 0,
+                disabled: en.position !== AT_DEPTH_POSITION,
+                placeholder: en.position !== AT_DEPTH_POSITION ? '深度无效' : '',
+                value: en.position === AT_DEPTH_POSITION ? String(en.depth) : '',
+                onChange: (e) => set({ depth: Number(e.target.value) || 0 }),
+              }),
             ),
             h('div', { className: 'wbed-field wbed-num' },
               h('label', { className: 'wbed-label' }, '顺序'),
@@ -645,7 +700,7 @@ function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange
           // 选择性 / 递归 / 概率 开关
           h('div', { className: 'wbed-checks' },
             h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.selective, onChange: (e) => set({ selective: e.target.checked }) }), h('span', null, '选择性（启用副触发词限制）')),
-            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.excludeRecursion, onChange: (e) => set({ excludeRecursion: e.target.checked }) }), h('span', null, '不可递归（不会被其他条目激活）')),
+            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.excludeRecursion, onChange: (e) => set({ excludeRecursion: e.target.checked }) }), h('span', null, '不可递归')),
             h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.delayUntilRecursion !== false, onChange: (e) => set({ delayUntilRecursion: e.target.checked ? 1 : false }) }), h('span', null, '延迟到递归')),
             h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.preventRecursion, onChange: (e) => set({ preventRecursion: e.target.checked }) }), h('span', null, '防止进一步递归')),
             h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.useProbability, onChange: (e) => set({ useProbability: e.target.checked }) }), h('span', null, '无视回复概率')),
@@ -678,12 +733,23 @@ function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange
                 h('option', { value: '1' }, '1 轮'),
               ),
             ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '延迟 ⏳'),
+              h('select', { className: 'wbed-select', value: en.delay === null ? '' : String(en.delay), onChange: (e: { target: { value: string } }) => set({ delay: e.target.value === '' ? null : Number(e.target.value) }) },
+                h('option', { value: '' }, '无延迟'),
+                h('option', { value: '1' }, '1 轮'),
+                h('option', { value: '2' }, '2 轮'),
+                h('option', { value: '3' }, '3 轮'),
+                h('option', { value: '4' }, '4 轮'),
+                h('option', { value: '5' }, '5 轮'),
+              ),
+            ),
           ),
           // 额外匹配来源
           h('section', { className: 'wbed-section' },
             h('div', { className: 'wbed-section-head' },
               h('span', { className: 'wbed-accent' }), '额外匹配来源',
-              h('button', { className: 'wbed-fold', style: { marginLeft: 'auto', width: 32, height: 32, background: '#fff0f5', color: '#d85d89' }, onClick: () => setSourcesOpen(!sourcesOpen) }, sourcesOpen ? '⌃' : '⌄'),
+              h('button', { className: 'wbed-fold', style: { marginLeft: 'auto', width: 32, height: 32, background: 'var(--ml-pink-0)', color: 'var(--ml-pink-6)' }, onClick: () => setSourcesOpen(!sourcesOpen) }, sourcesOpen ? '⌃' : '⌄'),
             ),
             sourcesOpen && h('div', { className: 'wbed-sources' },
               [
@@ -738,7 +804,7 @@ function ContentArea(props: { textareaRef: React.RefObject<HTMLTextAreaElement |
 }
 
 function toggleField(label: string, checked: boolean, onChange: (v: boolean) => void) {
-  return h('label', { style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: '#705a65' } },
+  return h('label', { style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: 'var(--ml-label)' } },
     h('span', { style: { flex: 1 } }, label),
     h('input', { type: 'checkbox', style: { accentColor: 'var(--ml-pink-5)', width: 18, height: 18 }, checked, onChange: (e: { target: { checked: boolean } }) => onChange(e.target.checked) }),
   )

@@ -15,8 +15,14 @@ export interface InjectedWorldEntry {
   content: string
   position: number
   insertionOrder: number
+  depth: number | null
+  role: number | null
   reason: string
 }
+
+// ST world_info_position.atDepth（在聊天指定深度插入）。
+export const AT_DEPTH_POSITION = 4
+export const DEFAULT_AT_DEPTH = 4
 
 function includesKey(text: string, key: string, caseSensitive: boolean, matchWholeWords: boolean): boolean {
   if (key.length === 0) return false
@@ -235,7 +241,15 @@ export function renderWorldbookInjection(messageLines: string[], opts: { depth?:
   // ST 排序：position 分组（before 0 在前，其余按其枚举顺序），组内 order 降序
   return [...deduped]
     .sort((a, b) => a.position - b.position || b.insertionOrder - a.insertionOrder)
-    .map((v) => ({ content: v.content, position: v.position, insertionOrder: v.insertionOrder, reason: 'matched' }))
+    .map((v) => ({
+      content: v.content,
+      position: v.position,
+      insertionOrder: v.insertionOrder,
+      // 深度仅对 @D 位置有效；非 @D 位置深度无效（对齐 ST 注入逻辑）
+      depth: v.position === AT_DEPTH_POSITION ? (v.depth ?? DEFAULT_AT_DEPTH) : null,
+      role: v.position === AT_DEPTH_POSITION ? (v.role ?? 0) : null,
+      reason: 'matched',
+    }))
 }
 
 // Inclusion Group 互斥：同 group 且非 groupOverride 中，仅保留 order 最大的一个（返回扁平去重集合）。
