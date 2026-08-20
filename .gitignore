@@ -1,12 +1,17 @@
 # 依赖与构建产物
 node_modules/
-lib/
 
-# 运行时数据（SQLite 世界书库等）
-data/
+# 说明：lib/（构建产物）需提交入库，否则 `dsh plugin add github:...` 安装后
+# 没有 main 指向的 lib/index.js，插件无法加载。与 dsh-agent-rp 的发布方式一致。
+
+# 运行时数据（SQLite 世界书库等，仅限仓库根目录；lib/data 是构建产物需入库）
+/data/
 
 # 日志
 *.log
+
+# 运行时状态记录（不入库）
+STATUS.md
 
 # 系统 / 编辑器
 .DS_Store

@@ -1,13 +1,15 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { openDb } from '../lib/db/index.js'
 import * as wb from '../lib/data/worldbook.js'
 import * as inj from '../lib/context/worldbook.js'
 
+const fixture = fileURLToPath(new URL('./fixtures/注入测试世界书.json', import.meta.url))
 const dir = mkdtempSync(join(tmpdir(), 'wb-inject-'))
 openDb(dir)
-const sample = JSON.parse(readFileSync('temp/注入测试世界书.json', 'utf8'))
+const sample = JSON.parse(readFileSync(fixture, 'utf8'))
 const book = wb.create('注入测试世界书')
 wb.replaceEntries(book.id, wb.parseStWorldJson(JSON.stringify(sample)).entries)
 wb.setEnabled(book.id, true)

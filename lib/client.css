@@ -1,0 +1,20 @@
+/* src/client/theme.css */
+.dsh-worldbook-root {
+  --ml-pink-5: #e37aa6;
+  --ml-line: #f0dbe4;
+  color: #3a2a33;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.dsh-worldbook-root input,
+.dsh-worldbook-root select,
+.dsh-worldbook-root textarea,
+.dsh-worldbook-root button {
+  font-family: inherit;
+  font-size: inherit;
+}
+.dsh-worldbook-placeholder {
+  padding: 32px;
+  text-align: center;
+  color: #a58793;
+}

@@ -1,0 +1,225 @@
+{
+  "entries": {
+    "0": {
+      "key": [
+        "星核"
+      ],
+      "keysecondary": [],
+      "comment": "常驻-星核",
+      "content": "【常驻测试】星核相关背景，无条件始终注入。",
+      "constant": true,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 0,
+      "position": 0,
+      "enabled": true,
+      "uid": 0
+    },
+    "1": {
+      "key": [
+        "黑塔"
+      ],
+      "keysecondary": [],
+      "comment": "关键词-黑塔",
+      "content": "【关键词测试】提到黑塔时注入。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 1,
+      "position": 0,
+      "enabled": true,
+      "uid": 1
+    },
+    "2": {
+      "key": [
+        "贝洛伯格"
+      ],
+      "keysecondary": [
+        "寒潮",
+        "暴风雪"
+      ],
+      "comment": "选择性AND",
+      "content": "【选择性AND】提到贝洛伯格且(寒潮或暴风雪)。",
+      "constant": false,
+      "vectorized": false,
+      "selective": true,
+      "selectiveLogic": 0,
+      "order": 2,
+      "position": 0,
+      "enabled": true,
+      "uid": 2
+    },
+    "3": {
+      "key": [
+        "丹恒"
+      ],
+      "keysecondary": [
+        "冷面"
+      ],
+      "comment": "选择性NOT",
+      "content": "【选择性NOT】提到丹恒但未提冷面。",
+      "constant": false,
+      "vectorized": false,
+      "selective": true,
+      "selectiveLogic": 1,
+      "order": 3,
+      "position": 0,
+      "enabled": true,
+      "uid": 3
+    },
+    "4": {
+      "key": [
+        "希儿"
+      ],
+      "keysecondary": [],
+      "comment": "整词匹配",
+      "content": "【整词测试】整词匹配希儿：后随中文不命中，后随标点命中，希儿XX不触发。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "matchWholeWords": true,
+      "order": 4,
+      "position": 0,
+      "enabled": true,
+      "uid": 4
+    },
+    "5": {
+      "key": [
+        "/test\\d+/"
+      ],
+      "keysecondary": [],
+      "comment": "正则匹配",
+      "content": "【正则测试】匹配 test 后跟数字。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 5,
+      "position": 0,
+      "enabled": true,
+      "uid": 5
+    },
+    "6": {
+      "key": [
+        "深居"
+      ],
+      "keysecondary": [],
+      "comment": "深度2扫描",
+      "content": "【深度测试】深居在超出最近2条之外则不注入（默认深度2，扫描最近2条消息）。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 6,
+      "position": 0,
+      "enabled": true,
+      "uid": 6
+    },
+    "7": {
+      "key": [
+        "深扫"
+      ],
+      "keysecondary": [],
+      "comment": "深度0全扫",
+      "content": "【深度0测试】深扫在任意位置都命中。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 7,
+      "position": 0,
+      "enabled": true,
+      "uid": 7
+    },
+    "8": {
+      "key": [
+        "组A"
+      ],
+      "keysecondary": [],
+      "comment": "组互斥-A1",
+      "content": "【组互斥A1】组A条目1。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 8,
+      "position": 0,
+      "enabled": true,
+      "group": "测试组",
+      "groupOverride": false,
+      "uid": 8
+    },
+    "9": {
+      "key": [
+        "组A"
+      ],
+      "keysecondary": [],
+      "comment": "组互斥-A2",
+      "content": "【组互斥A2】组A条目2（order更高应胜出）。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 9,
+      "position": 0,
+      "enabled": true,
+      "group": "测试组",
+      "groupOverride": false,
+      "uid": 9
+    },
+    "10": {
+      "key": [
+        "概率"
+      ],
+      "keysecondary": [],
+      "comment": "概率注入",
+      "content": "【概率测试】probability=50，多轮重复验证约一半轮次注入。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 10,
+      "position": 0,
+      "enabled": true,
+      "useProbability": true,
+      "probability": 50,
+      "uid": 10
+    },
+    "11": {
+      "key": [
+        "禁用词"
+      ],
+      "keysecondary": [],
+      "comment": "禁用条目",
+      "content": "【禁用测试】不应注入。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 11,
+      "position": 0,
+      "enabled": false,
+      "uid": 11
+    },
+    "12": {
+      "key": [
+        "黑塔空间站"
+      ],
+      "keysecondary": [],
+      "comment": "标题含黑塔",
+      "content": "【子串测试】黑塔空间站含黑塔，应仅命中黑塔。",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "order": 12,
+      "position": 0,
+      "enabled": true,
+      "uid": 12
+    }
+  },
+  "name": "注入测试世界书"
+}

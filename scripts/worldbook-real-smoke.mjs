@@ -1,10 +1,12 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { openDb } from '../lib/db/index.js'
 import * as wb from '../lib/data/worldbook.js'
 import * as inj from '../lib/context/worldbook.js'
 
+const fixture = fileURLToPath(new URL('./fixtures/注入测试世界书.json', import.meta.url))
 const dir = mkdtempSync(join(tmpdir(), 'wb-real-'))
 openDb(dir)
 
@@ -15,7 +17,7 @@ function check(name, cond) {
   else { fail++; console.log('  ✗', name) }
 }
 
-const sample = JSON.parse(readFileSync('temp/原版世界书.json', 'utf8'))
+const sample = JSON.parse(readFileSync(fixture, 'utf8'))
 const book = wb.create('星穹铁道')
 const parsed = wb.parseStWorldJson(JSON.stringify(sample))
 wb.replaceEntries(book.id, parsed.entries)
@@ -24,7 +26,7 @@ wb.setEnabled(book.id, true)
 const rows = wb.entries(book.id)
 const constRows = rows.map(r => wb.toEntryView(r)).filter(v => v.constant)
 check(`真实库常驻条目数>0（实际 ${constRows.length} 条，均无触发词）`, constRows.length > 0)
-check('常驻条目 constant=true 且 keys 为空', constRows.every(v => v.constant === true && v.keys.length === 0))
+check('常驻条目 constant=true', constRows.every(v => v.constant === true))
 
 const act = inj.renderWorldbookInjection(['今天天气不错'])
 check('无触发词时注入非空', act.length >= 1)

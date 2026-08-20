@@ -17,6 +17,7 @@ function check(name, cond, detail = '') {
 }
 
 // 构造测试条目（book 内同 order 递增，避免排序干扰）
+// 注意：本项目默认 excludeRecursion=true（不可递归），需要递归激活的条目须显式 excludeRecursion: false。
 // A：关键词「甲」命中后，content 含「乙」，可触发递归
 // B：关键词「乙」，被 A 递归命中
 // C：excludeRecursion，关键词「丙」，递归轮应跳过
@@ -27,8 +28,8 @@ const mk = (comment, patch) => {
   const row = wb.addEntry(book.id, { comment, content: `C:${comment}`, keys: [], enabled: true, ...patch })
   return row.id
 }
-const A = mk('A递归触发', { keys: ['甲'], content: 'C:A 这里包含乙' })
-const B = mk('B被递归命中', { keys: ['乙'] })
+const A = mk('A递归触发', { keys: ['甲'], content: 'C:A 这里包含乙', excludeRecursion: false })
+const B = mk('B被递归命中', { keys: ['乙'], excludeRecursion: false })
 const C = mk('C排除递归', { keys: ['丙'], excludeRecursion: true })
 const D = mk('D阻止递归', { keys: ['丁'], preventRecursion: true, content: 'C:D 这里包含戊' })
 const E = mk('E粘性', { keys: ['粘'], sticky: 3 })
@@ -48,9 +49,9 @@ console.log('2) excludeRecursion：递归轮不被递归文本激活')
 wb.clearTimedEffects(book.id)
 const book2 = wb.create('排除递归强测')
 wb.setEnabled(book2.id, true)
-wb.addEntry(book2.id, { comment: 'A触发', content: 'C:A 包含丙', keys: ['甲'] })
+wb.addEntry(book2.id, { comment: 'A触发', content: 'C:A 包含丙', keys: ['甲'], excludeRecursion: false })
 wb.addEntry(book2.id, { comment: 'C排除', content: 'C:C 丙条目', keys: ['丙'], excludeRecursion: true })
-wb.addEntry(book2.id, { comment: 'H对照', content: 'C:H 丙条目', keys: ['丙'] })
+wb.addEntry(book2.id, { comment: 'H对照', content: 'C:H 丙条目', keys: ['丙'], excludeRecursion: false })
 function hit2(lines, cursor = 1) {
   return inj.renderWorldbookInjection(lines, { depth: 2, cursor }).map(w => w.content)
 }
@@ -64,7 +65,7 @@ console.log('3) preventRecursion：D 命中后 content 不入 buffer')
 const book3 = wb.create('阻止递归强测')
 wb.setEnabled(book3.id, true)
 wb.addEntry(book3.id, { comment: 'D阻止', content: 'C:D 这里包含戊', keys: ['丁'], preventRecursion: true })
-wb.addEntry(book3.id, { comment: 'G戊条目', content: 'C:G 戊条目', keys: ['戊'] })
+wb.addEntry(book3.id, { comment: 'G戊条目', content: 'C:G 戊条目', keys: ['戊'], excludeRecursion: false })
 function hit3(lines, cursor = 1) {
   return inj.renderWorldbookInjection(lines, { depth: 2, cursor }).map(w => w.content)
 }
@@ -94,8 +95,8 @@ console.log('6) delay：cursor < delay 时强制注入')
 const book6 = wb.create('延迟测试')
 wb.setEnabled(book6.id, true)
 wb.addEntry(book6.id, { comment: '延迟3', content: 'C:延迟3', keys: ['延迟三'], delay: 3 })
-wb.addEntry(book6.id, { comment: '延迟递归', content: 'C:延迟递归', keys: ['递归启'], delayUntilRecursion: true })
-wb.addEntry(book6.id, { comment: 'A触发', content: 'C:A 包含递归启', keys: ['甲'] })
+wb.addEntry(book6.id, { comment: '延迟递归', content: 'C:延迟递归', keys: ['递归启'], delayUntilRecursion: true, excludeRecursion: false })
+wb.addEntry(book6.id, { comment: 'A触发', content: 'C:A 包含递归启', keys: ['甲'], excludeRecursion: false })
 function hit6(lines, cursor = 1) {
   return inj.renderWorldbookInjection(lines, { depth: 2, cursor }).map(w => w.content)
 }
@@ -108,10 +109,10 @@ check('delayUntilRecursion 递归轮 注入', hit6(['甲'], 1).some(x => x.start
 console.log('7) delayUntilRecursion 层级（第 N 层递归激活）')
 const book7 = wb.create('延迟层级')
 wb.setEnabled(book7.id, true)
-wb.addEntry(book7.id, { comment: 'A1', content: 'C:A1 包含乙', keys: ['甲'] })
-wb.addEntry(book7.id, { comment: 'A2', content: 'C:A2 包含丙', keys: ['乙'] })
-wb.addEntry(book7.id, { comment: '延迟1', content: 'C:延迟1', keys: ['乙'], delayUntilRecursion: 1 })
-wb.addEntry(book7.id, { comment: '延迟2', content: 'C:延迟2', keys: ['丙'], delayUntilRecursion: 2 })
+wb.addEntry(book7.id, { comment: 'A1', content: 'C:A1 包含乙', keys: ['甲'], excludeRecursion: false })
+wb.addEntry(book7.id, { comment: 'A2', content: 'C:A2 包含丙', keys: ['乙'], excludeRecursion: false })
+wb.addEntry(book7.id, { comment: '延迟1', content: 'C:延迟1', keys: ['乙'], delayUntilRecursion: 1, excludeRecursion: false })
+wb.addEntry(book7.id, { comment: '延迟2', content: 'C:延迟2', keys: ['丙'], delayUntilRecursion: 2, excludeRecursion: false })
 function hit7(lines, cursor = 1) {
   return inj.renderWorldbookInjection(lines, { depth: 2, cursor }).map(w => w.content)
 }

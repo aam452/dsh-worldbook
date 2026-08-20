@@ -1,7 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { openDb } from './db/index.js'
 import { registerRest } from './rest/index.js'
 import { registerContextInjection } from './context/inject.js'
@@ -13,9 +12,10 @@ export const name = 'dsh-worldbook'
 export const inject = ['webServer', 'tools']
 
 export function apply(ctx: Context) {
-  // 数据目录：<插件项目根>/data/worldbook/
-  const projectRoot = fileURLToPath(new URL('..', import.meta.url))
-  const dataDir = join(projectRoot, 'data', 'worldbook')
+  // 数据目录：~/.dsh/worldbook/（DSH 统一用户数据根目录）。
+  // 不放在插件包内：`dsh plugin add github:...` 安装时包位于 pnpm store，
+  // 写入包内目录会因 store 只读/去重而丢失数据；放 DSH home 下随插件更新存活。
+  const dataDir = dshHomePath('worldbook')
   mkdirSync(dataDir, { recursive: true })
 
   openDb(dataDir)

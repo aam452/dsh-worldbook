@@ -1,10 +1,12 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { openDb } from '../lib/db/index.js'
 import * as wb from '../lib/data/worldbook.js'
 import * as inj from '../lib/context/worldbook.js'
 
+const fixture = fileURLToPath(new URL('./fixtures/注入测试世界书.json', import.meta.url))
 const dir = mkdtempSync(join(tmpdir(), 'wb-test-'))
 openDb(dir)
 
@@ -15,15 +17,15 @@ function check(name, cond) {
   else { fail++; console.log('  ✗', name) }
 }
 
-// 1) 真实星穹世界书导入（ST JSON→库）
-const sample = JSON.parse(readFileSync('temp/原版世界书.json', 'utf8'))
+// 1) 真实 ST 世界书导入（ST JSON→库）
+const sample = JSON.parse(readFileSync(fixture, 'utf8'))
 const book = wb.create('星穹铁道')
-console.log('导入兼容（st 内部格式 21 条）:')
+console.log('导入兼容（st 内部格式 13 条）:')
 let parsed
 try {
   parsed = wb.parseStWorldJson(JSON.stringify(sample))
   wb.replaceEntries(book.id, parsed.entries)
-  check('条目数=21', wb.entries(book.id).length === 21)
+  check('条目数=13', wb.entries(book.id).length === 13)
   check('默认不启用', wb.get(book.id)?.enabled === 0)
 } catch (e) {
   check('导入成功（失败：' + e.message + ')', false)
@@ -78,7 +80,7 @@ check('updateEntry 保留 keys', uv.keys.join() === '甲,乙')
 console.log('导出还原:')
 const st = JSON.parse(wb.toStWorldJson(book.id))
 const st0 = st.entries['0']
-check('导出 entries 键数=21', Object.keys(st.entries).length === 21)
+check('导出 entries 键数=13', Object.keys(st.entries).length === 13)
 check('导出[0] 有 key 字段', 'key' in st0 || 'keys' in st0)
 check('导出有 constant', 'constant' in st0)
 check('导出有 position', 'position' in st0)
