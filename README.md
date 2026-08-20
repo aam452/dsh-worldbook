@@ -1,184 +1,187 @@
 # dsh-worldbook
 
-A World Info (Lorebook) plugin for DeepSeek Harness.
+[English](README.en.md) | **简体中文**
 
+这是一个DeepSeek Harness的世界书插件。
 ---
 
-## What This Project Does
+## 这个项目能干嘛
 
-- **Use World Books**: Create, import, edit, and export world books, with an injection mechanism that attaches a set of background lore to the AI.
-- **SillyTavern Compatible**: SillyTavern world book JSON files can be imported directly, with field and injection semantics aligned.
-- **Let the AI Maintain the Lore**: With "World Book Dev Mode" enabled, the AI can create world books and add/remove/edit entries on its own — ideal for roleplay/creative workspaces.
+- **用世界书**：新建、导入、编辑、导出世界书，并且有注入机制，给 AI 挂一套背景设定。
+- **兼容 SillyTavern**：SillyTavern 的世界书 JSON 可以直接导入用，语义和注入行为也对齐。
+- **让 AI 自己维护设定**：开启「开发世界书模式」后，AI 能自己新建世界书、增删改条目，适合做角色扮演/创作类工作区。
 
-## Overview
+## 说明
 
-This plugin brings SillyTavern's World Info into DSH and adds two practical capabilities on top: **letting the AI write world books itself** and **permission control for edits**.
+本插件把 SillyTavern 的世界书搬到 DSH 里，并在此基础上补了两个很实用的能力：**让 AI 自己写世界书**、**编写的权限设置**。
 
-Currently only the PC web UI is developed; mobile UI is not yet adapted.
+目前仅开发了pc端ui，未进行移动端ui适配
 
-DeepSeek Harness version: **0.1.0-rc.8**. Other versions are untested.
+DeepSeek Harness版本：**0.1.0-rc.8**。其它版本未测试
 
-## Key Features
+## 主要特点
 
-| Feature | Description |
+| 特点 | 说明 |
 | --- | --- |
-| 🗂️ SillyTavern-compatible world books | Import/export ST JSON, fully aligned fields and injection semantics, a fairly complete injection system |
-| 🤖 World Book Dev Mode | Let the AI write world books itself, with configurable add/delete/edit/query permissions, and control which world book the AI can edit |
-| 🎨 UI Themes | Follow the DSH theme, or use an independent pink theme |
-| 🧩 Integrable | Both the world book management page and the settings card can be embedded into your own plugin |
+| 🗂️ 兼容 SillyTavern 世界书 | 导入/导出 ST JSON，字段与注入语义全对齐，较完整的注入系统 |
+| 🤖 世界书开发模式 | 让 AI 自己编写世界书，可配置增/删/改/查权限，也可设置ai能够编辑哪一本世界书 |
+| 🎨 界面主题 | 可跟随 DSH 主题，也可用独立的粉色主题 |
+| 🧩 可集成 | 世界书管理页和设置卡片都能嵌进你自己的插件里 |
 
 ---
 
-## Installation & Updates
+## 安装与更新
 
-> Prerequisites: Node.js ≥ 22.18 and pnpm installed (`dsh plugin` forwards arguments to pnpm). Plugin data (the SQLite world book database) is stored in `~/.dsh/worldbook/` and is identical regardless of install method.
+> 前置：Node.js ≥ 22.18，并安装 pnpm（`dsh plugin` 会把参数转发给 pnpm 执行）。插件数据（SQLite 世界书库）统一存放在 `~/.dsh/worldbook/`，两种方式安装后一致。
 
-### Method 1: Install via the official dsh CLI (recommended)
+### 方式一：dsh 官方命令安装（推荐）
 
-If the `dsh` CLI is installed globally, run:
+如果本机已全局安装 `dsh` CLI，直接：
 
 ```bash
 dsh plugin --profile web add github:aam452/dsh-worldbook
 dsh --profile web
 ```
 
-You can also pull the latest CLI without a global install, using `npx`:
+也可以不依赖全局安装，用 `npx` 拉取最新版 CLI：
 
 ```bash
 npx -p @deepseek-ai/dsh@latest dsh plugin --profile web add github:aam452/dsh-worldbook
 npx -p @deepseek-ai/dsh@latest dsh --profile web
 ```
 
-- To update the plugin:
+- 更新插件：
 
 ```bash
 dsh plugin --profile web update dsh-worldbook
 ```
 
-### Method 2: Install from source (for development / secondary development)
+### 方式二：从源码安装（开发 / 二次开发用）
 
 ```bash
-# 1. Clone and build
+# 1. 克隆并构建
 git clone https://github.com/aam452/dsh-worldbook
-cd dsh-worldbook     # replace with the actual local path of your dsh-worldbook checkout
+cd dsh-worldbook     # 换成本地已下载的真实的dsh-worldbook地址
 npm install
-npm run build        # output in lib/: host half via tsc + client half via esbuild
+npm run build        # 产物 lib/：host 半 tsc + client 半 esbuild
 
-# 2. Install into a dsh profile (run in the plugin repo root; `.` resolves to a link dependency on the local source)
+# 2. 装进 dsh profile（在插件仓库根目录执行；`.` 会被解析为对本地源码的 link 依赖）
 dsh plugin --profile web add .
 
-# 3. Start
+# 3. 启动
 dsh --profile web
 ```
 
-After modifying the source, run `npm run build` again, then re-run `dsh plugin --profile web add .` to make the profile reference the latest local build.
+改动源码后，重新执行 `npm run build`，再跑一次 `dsh plugin --profile web add .` 即可让 profile 引用最新的本地构建。
 
 ---
 
-## Quick Start
+## 快速上手
 
-1. **Enable**: In DSH Settings → Plugins, enable this plugin.
-2. **Create a book**: Open the "World Book" page, create a new one, or directly import a SillyTavern world book JSON.
-3. **Edit entries**: Select a world book, add an entry, and fill in keywords and content.
+1. **启用**：在 DSH 设置 → 插件里启用本插件。
+2. **建书**：打开「世界书」页面，新建一本，或直接导入 SillyTavern 世界书 JSON。
+3. **编辑条目**：选中世界书，新增条目，填关键词和内容。
 
-> The settings page offers options such as "Enable Toggle", "Active Workspace", "Theme", "Injection Timing", and "World Book Dev Mode" — adjust them as needed.
+> 设置页里有「启用开关」「生效工作区」「主题」「注入时机」「开发世界书模式」等选项，按需调整即可。
 
-### Injection Behavior Compatibility with SillyTavern World Books
 
-Based on the actual implementation of the injection engine (`src/context/`), behavior is split into two categories: **real injection implemented** and **format-only compatibility (storage/import-export, no effect on injection yet)**.
 
-#### Real Injection Implemented
+### 与 SillyTavern 世界书的注入行为兼容
 
-| Behavior | Description |
+按注入引擎的真实实现（`src/context/`），这里分两类说明：**已实现真实注入** 与 **仅兼容格式（存取/导入导出，暂不影响注入）**。
+
+#### 已实现真实注入
+
+| 行为 | 说明 |
 | --- | --- |
-| Keyword triggering | Inject on primary keyword match (substring / whole word / regex) |
-| Selective | After primary key matches, filter by the combination logic of secondary keywords (`selectiveLogic`) |
-| Constant | `constant` entries are always injected unconditionally |
-| Delay | Force injection within the first few messages of a session |
-| Sticky | Force injection within a few messages after a match |
-| Cooldown | Suppress injection within a few messages after a match |
-| Probability | Decide per occurrence whether to inject, based on a percentage |
-| Recursive scanning | Keywords inside already-injected content can trigger other entries (up to 5 levels) |
-| Recursion control | `excludeRecursion` (skip this recursion round) / `preventRecursion` (content not added to the recursion buffer) / `delayUntilRecursion` |
-| Group mutual exclusion | Within the same group (`group`), take one entry by `order`; `groupOverride` can force an override |
-| Position / ordering | Group by `position`, sort by `order` within group, then inject |
-| @D deep insertion | Entries with `position=@D` are inserted into the chat at the specified depth (same-depth entries merged into one) |
+| 关键词触发 | 命中主关键词（子串 / 整词 / 正则）即注入 |
+| 选择性 | 命中主键后，再按副关键词的组合逻辑（selectiveLogic）过滤 |
+| 常驻注入 | `constant` 条目无条件始终注入 |
+| 延迟 delay | 会话刚开始的若干条消息内强制注入 |
+| 粘性 sticky | 命中后若干条消息内强制注入 |
+| 冷却 cooldown | 命中后若干条消息内不再注入 |
+| 概率 probability | 命中后按百分比决定本次是否注入 |
+| 递归扫描 | 已注入内容里的关键词，可继续触发其它条目（最多 5 层） |
+| 递归控制 | `excludeRecursion`（递归轮跳过）/ `preventRecursion`（内容不进递归缓冲）/ `delayUntilRecursion` |
+| 组互斥 | 同一分组（`group`）内按 order 取一条，`groupOverride` 可强制覆盖 |
+| 位置 / 排序 | 按 position 分组、组内按 order 排序后注入 |
+| @D 深度插入 | `position=@D` 的条目按深度插到聊天指定位置（同深度合并为一条） |
 
-> The time cursor for injection aligns with ST's `chat.length` (advances only with real conversation messages), keeping cross-turn behaviors (sticky/cooldown/delay) consistent with SillyTavern.
+> 注入相关的时间游标对齐 ST 的 `chat.length`（只按真实对话消息推进），保证跨轮行为（粘性/冷却/延迟）与 SillyTavern 一致。
 
-#### Format-Only Compatibility (Storage / Import-Export, No Injection Logic Yet)
+#### 仅兼容格式（存取 / 导入导出，暂无真实注入逻辑）
 
-The following fields can be imported, edited, exported, and round-tripped, but **do not currently participate in injection decisions**:
+以下字段可以正常导入、编辑、导出、往返保留，但**当前不参与注入判定**：
 
-| Field | Description |
+| 字段 | 说明 |
 | --- | --- |
-| `vectorized` | No real vector retrieval; currently treated as constant |
-| `priority` | Preserved; injection ordering uses only `order`, not `priority` |
-| `groupWeight` | Preserved; group mutual exclusion uses only `order`, not group weight |
-| `scanDepth` (entry-level) | Preserved; the actual scan window uses a fixed depth (last 2 messages); entry-level setting has no effect |
-| `role` | Preserved; deep insertion works for @D entries, but the message role is always "user" |
-| `outletName` / `automationId` / `triggers` / `characterFilter` / `matchPersonaDescription` etc. | Preserved, no injection logic |
+| `vectorized` | 无真实向量检索，目前当作常驻处理 |
+| `priority` | 存取保留；注入排序只按 `order`，不按 `priority` |
+| `groupWeight` | 存取保留；组互斥只按 `order`，不用组权重 |
+| `scanDepth`（条目级） | 存取保留；实际扫描范围用固定深度（最近 2 条），条目级不生效 |
+| `role` | 存取保留；@D 条目的深度插入生效，但消息角色统一为「用户」 |
+| `outletName` / `automationId` / `triggers` / `characterFilter` / `matchPersonaDescription` 等 | 存取保留，无注入逻辑 |
 
-Also: for non-@D entries, `position` only affects **injection order** (internal message ordering); unlike ST, content is not placed into different prompt regions (character definition / example messages / author's note, etc.); regular-position entries are all appended at the end of the context.
-
----
-
-## Secondary Development / Integration
-
-If you want more than out-of-the-box usage:
-
-- **Add features / change injection logic / extend the data model**;
-- **Integrate the world book UI into your own plugin**: world book management page + plugin settings card, wired through DSH slots;
-- **Use only its capabilities**: call the injection engine directly, or read/write world books via the REST API.
-
-See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for details.
+另外：非 @D 的 `位置` 只影响**注入顺序**（消息内部排序），不会像 ST 那样把内容放到不同的提示区域（角色定义 / 示例消息 / 作者注释等）；普通位置条目统一追加在上下文末尾。
 
 ---
 
-## Settings Overview
+## 二次开发 / 集成
 
-The following can be configured in the plugin's "Settings":
+如果你不满足于直接用，可以：
 
-| Setting | Description |
+- **给插件加功能 / 改注入逻辑 / 扩展数据模型**；
+- **把世界书 UI 集成进你自己的插件**：世界书管理页 + 插件设置卡片，通过 DSH 槽位对接；
+- **只用它的能力**：直接调用注入引擎，或走 REST API 读写世界书。
+
+详细说明见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
+
+---
+
+## 设置项一览
+
+在插件的「设置」里可以配置：
+
+| 配置 | 说明 |
 | --- | --- |
-| Enable Toggle | World books no longer inject when disabled |
-| Active Workspace | Choose the DSH workspace: all workspaces / only the specified workspace |
-| Theme | Follow the DSH theme / independent pink theme |
-| Injection Timing | Body injection (default) / per-turn injection (not recommended, may duplicate) |
-| World Book Dev Mode | Expose world book editing tools to the AI when enabled |
-| AI Permissions | Control which operations the AI can add / delete / edit / query |
+| 启用开关 | 关闭后世界书不再注入 |
+| 生效工作区 | 选择dsh的工作区，全部工作区 / 仅指定工作区 |
+| 主题 | 跟随 DSH 主题 / 独立粉色主题 |
+| 注入时机 | 正文注入（默认）/ 每轮注入（不推荐，可能重复） |
+| 开发世界书模式 | 开启后向 AI 暴露世界书编辑工具 |
+| AI 权限 | 控制 AI 能增 / 删 / 改 / 查哪些操作 |
 
 ---
 
-## Known Limitations
+## 已知限制
 
-- This is a world book plugin only; there is no "character card" concept, and it cannot be bound to character cards.
-- When enabled alongside other world book plugins, configure carefully; do not enable the same world book in both, or content will be injected twice. Enabling other world book plugins/features simultaneously is not recommended.
-- In Dev Mode, the AI's world book editing scope/permissions are currently **book-level** (managed per world book), and **entry-level** permission control is not implemented.
-- No prompt for World Book Dev Mode is pre-configured. When using dev features to develop a world book, it is recommended to configure one first — write your own or import a "world book about writing world books" constraint field usage scenario and provide writing guidance, e.g. "world book entries must be non-recursive", as the prompt.
-- In World Book Dev Mode, the AI's edit scope is constrained by "Dev Mode" and "AI Permissions" — this is a safety design.
+- 本插件仅为世界书插件，没有"角色卡"的概念，不能绑定角色卡
+- 与其它世界书插件同时启用时注意配置，不要同时开启同一本世界书，否则会导致重复注入。不建议同时开启其它世界书插件/功能
+- 开发模式下，AI的世界书编辑区域/权限目前是**书级**的（以一本世界书为单位进行管理），未实现**条目级**权限控制。
+- 未配置开发世界书的提示词，用开发功能开发世界书时建议先行配置，可自写或导入"写世界书的世界书"约束字段的使用场景，并进行书写指导，如"世界书条目统一用不可递归"等作为提示词。
+- 开发世界书模式下，AI 的编辑范围受「开发模式」与「AI 权限」约束，属安全设计。
 
 ---
 
-## Development / Build
+## 开发 / 构建
 
 ```bash
 npm install
-npm run build        # builds the host half + client half
-npm run typecheck    # type checking
-npm run test:worldbook  # smoke tests for core logic
+npm run build        # 构建 host 半 + client 半
+npm run typecheck    # 类型检查
+npm run test:worldbook  # 核心逻辑冒烟测试
 ```
 
-Tech stack: TypeScript / Cordis / React, with an independent SQLite database.
+技术栈：TypeScript / Cordis / React，数据存独立 SQLite。
 
 ---
 
-## License
+## 协议
 
 [MIT](LICENSE)
 
 ---
 
-## Acknowledgments
+## 致谢
 
-The semantics of SillyTavern's World Info are the reference this project aligns its behavior with.
+SillyTavern 的世界书（World Info）语义是本项目行为对齐的参照。
