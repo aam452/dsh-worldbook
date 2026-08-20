@@ -1,0 +1,56 @@
+{
+  "name": "dsh-worldbook",
+  "version": "0.1.0",
+  "description": "DSH 世界书插件：SillyTavern 世界书（World Info）全语义实现——关键词触发、递归、sticky/cooldown/delay、选择性、组互斥、概率、深度、自定义排序。",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "worldbook",
+    "world-info",
+    "lorebook",
+    "sillytavern"
+  ],
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-assets.mjs && node scripts/build-client.mjs",
+    "build:host": "tsc -p tsconfig.json && node scripts/build-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "test:worldbook": "npm run build:host && node scripts/worldbook-smoke.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-client-web-react": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

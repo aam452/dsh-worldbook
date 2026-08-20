@@ -1,0 +1,747 @@
+import { createElement as h } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import type { ReactNode, PointerEvent as RPointerEvent } from 'react'
+import { api, changed, onChanged } from './api'
+import type { ApiErr } from './api'
+
+function errText(e: unknown): string {
+  return e && typeof e === 'object' && 'message' in e ? String((e as ApiErr).message) : String(e)
+}
+
+// ── 通用 hooks ──
+function useData<T>(getter: () => Promise<T>): [T | null, string, () => void] {
+  const [data, setData] = useState<T | null>(null)
+  const [error, setError] = useState('')
+  const reload = useCallback(() => {
+    setError('')
+    getter().then(setData, (e) => setError(errText(e)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    reload()
+    return onChanged(reload)
+  }, [reload])
+  return [data, error, reload]
+}
+
+interface StWorldEntry {
+  id: string
+  comment: string | null
+  content: string
+  keys: string[]
+  keysecondary: string[]
+  constant: boolean
+  vectorized: boolean
+  selective: boolean
+  selectiveLogic: 0 | 1 | 2 | 3
+  insertionOrder: number
+  position: number
+  enabled: boolean
+  priority: number | null
+  caseSensitive: boolean | null
+  matchWholeWords: boolean | null
+  scanDepth: number | null
+  useGroupScoring: boolean | null
+  excludeRecursion: boolean
+  preventRecursion: boolean
+  delayUntilRecursion: boolean | number
+  probability: number
+  useProbability: boolean
+  depth: number
+  outletName: string
+  group: string
+  groupOverride: boolean
+  groupWeight: number
+  sticky: number | null
+  cooldown: number | null
+  delay: number | null
+  automationId: string
+  role: number | null
+  triggers: string[]
+  characterFilter: { isExclude: boolean; names: string[]; tags: string[] }
+  matchPersonaDescription: boolean
+  matchCharacterDescription: boolean
+  matchCharacterPersonality: boolean
+  matchCharacterDepthPrompt: boolean
+  matchScenario: boolean
+  matchCreatorNotes: boolean
+  displayIndex?: number
+  uid?: number
+  digest?: string
+}
+
+interface StWorldBook {
+  id: string
+  name: string
+  description: string | null
+  enabled: boolean
+  scanDepth: number | null
+  entryCount: number
+}
+
+const POSITION_OPTIONS = [
+  { value: 0, label: '↑Char' },
+  { value: 1, label: '↓Char' },
+  { value: 5, label: '↑EM' },
+  { value: 6, label: '↓EM' },
+  { value: 2, label: '↑AN' },
+  { value: 3, label: '↓AN' },
+  { value: 4, label: '@D' },
+  { value: 7, label: 'Outlet' },
+]
+
+const LOGIC_OPTIONS = [
+  { value: 0, label: 'AND ANY' },
+  { value: 1, label: 'NOT ALL' },
+  { value: 2, label: 'NOT ANY' },
+  { value: 3, label: 'AND ALL' },
+]
+
+const TRIGGERS = ['normal', 'continue', 'impersonate', 'swipe', 'regenerate', 'quiet']
+
+const TRI_OPTIONS = [
+  { value: '', label: '使用全局' },
+  { value: 'true', label: '是' },
+  { value: 'false', label: '否' },
+]
+
+// 条目展示顺序（对齐 ST world_info_sort_order，index.html:4841-4854）。custom 无方向；priority 固定方向。
+const SORT_OPTIONS = [
+  { key: 'custom', label: '自定义' },
+  { key: 'priority', label: '优先级' },
+  { key: 'comment', label: '标题' },
+  { key: 'content', label: 'Token' },
+  { key: 'depth', label: '深度' },
+  { key: 'order', label: '顺序' },
+  { key: 'uid', label: 'UID' },
+  { key: 'probability', label: '触发频率' },
+]
+// 需要方向切换的排序（custom 不显示方向按钮）
+const SORT_HAS_DIRECTION = ['priority', 'comment', 'content', 'depth', 'order', 'uid', 'probability']
+
+function WorldbooksPage() {
+  const [books, , reload] = useData<StWorldBook[]>(() => api('/worldbooks'))
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [msg, setMsg] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [onlyEnabled, setOnlyEnabled] = useState(false)
+  const bookList = (books ?? []).filter((b) => !onlyEnabled || b.enabled)
+  const selected = bookList.find((b) => b.id === selectedId) ?? null
+
+  const toggleSelect = (id: string) => setSelectedId((prev) => (prev === id ? null : id))
+
+  const refresh = useCallback(() => { changed(); reload() }, [reload])
+
+  async function handleCreated(name: string) {
+    setCreating(true)
+    try {
+      await api('/worldbooks', { method: 'POST', body: JSON.stringify({ name }) })
+      setMsg('已新建：' + name)
+      const next = await api<StWorldBook[]>('/worldbooks')
+      setSelectedId(next.find((b) => b.name === name)?.id ?? null)
+      refresh()
+    } catch (e) {
+      setMsg('新建失败：' + (e as Error).message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function doDelete(book: StWorldBook) {
+    if (!confirm(`确定删除世界书「${book.name}」？其下 ${book.entryCount} 条条目将一并删除。`)) return
+    api(`/worldbooks/${book.id}`, { method: 'DELETE' }).then(() => {
+      setMsg('已删除')
+      if (selectedId === book.id) setSelectedId(null)
+      refresh()
+    }).catch((e) => setMsg('删除失败：' + (e as Error).message))
+  }
+
+  return h('div', { className: 'wb-page' },
+    // 卡1：新建 + 已有世界书列表（可选中）
+    h('div', { className: 'wb-card', style: { maxHeight: 320, display: 'flex', flexDirection: 'column' } },
+      h('div', { className: 'wb-card-hd' },
+        '世界书',
+        h('span', { style: { flex: 1 } }),
+        h('button', { className: 'wb-btn' + (onlyEnabled ? ' active' : ''), title: onlyEnabled ? '显示全部世界书' : '只显示已启用的世界书', onClick: () => { setOnlyEnabled(!onlyEnabled); setSelectedId(null) } }, onlyEnabled ? '已启用 ✓' : '只看已启用'),
+        h('button', { className: 'wb-btn primary', onClick: () => setCreating(true), disabled: creating }, '＋ 新建世界书'),
+        h('button', { className: 'wb-btn', disabled: !selected, onClick: () => selected && downloadWorldbook(selected) }, '导出'),
+        h('label', { className: 'wb-btn', style: { cursor: 'pointer' } },
+          '导入',
+          h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' }, onChange: (e) => onWorldbookImport(e, () => { setMsg('导入成功 ✓'); refresh() }, (id) => setSelectedId(id)) }),
+        ),
+      ),
+      h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },
+        bookList.length === 0
+          ? h('div', { className: 'wb-hint' }, '还没有世界书，点「＋ 新建世界书」创建一本，或用「导入」读取 ST 世界书 JSON。')
+          : bookList.map((book) =>
+            h('div', {
+              key: book.id,
+              className: 'wb-row' + (book.id === selectedId ? ' selected' : ''),
+              onClick: () => toggleSelect(book.id),
+            },
+              h('input', {
+                type: 'radio', name: 'wb-select', className: 'wb-radio', checked: book.id === selectedId,
+                onChange: () => toggleSelect(book.id),
+                onClick: (e) => e.stopPropagation(),
+              }),
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                h('div', { className: 'wb-name' }, book.name),
+                h('div', { className: 'wb-meta' }, `${book.entryCount} 条目`),
+              ),
+              h('div', {
+                className: 'wb-switch' + (book.enabled ? '' : ' off'), title: '启用/停用',
+                onClick: (e) => {
+                  e.stopPropagation()
+                  api(`/worldbooks/${book.id}`, { method: 'PUT', body: JSON.stringify({ enabled: !book.enabled }) }).then(refresh).catch((err) => alert((err as Error).message))
+                },
+              }, undefined),
+              h('button', { className: 'wb-btn danger', onClick: (e) => { e.stopPropagation(); doDelete(book) } }, '删除'),
+            ),
+          ),
+      ),
+    ),
+    // 卡2：编辑选中的世界书（可大一点）
+    selected
+      ? h(WorldbookEditor, { key: selected.id, book: selected, onChange: refresh })
+      : h('div', { className: 'wb-card', style: { maxHeight: 560 } },
+        h('div', { className: 'wb-card-hd' }, '编辑'),
+        h('div', { className: 'wb-card-bd' },
+          h('div', { className: 'wb-hint' }, '从上方选择一本世界书开始编辑。'),
+        ),
+      ),
+    msg ? h('div', { className: 'wb-hint' }, msg) : null,
+    creating ? h(NewWorldbookModal, { onConfirm: handleCreated, onClose: () => setCreating(false) }) : null,
+  )
+}
+
+function NewWorldbookModal(props: { onConfirm: (name: string) => Promise<void>; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  return h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+    h('div', { className: 'wb-card', style: { width: 'min(400px, 92vw)' } },
+      h('div', { className: 'wb-card-hd' }, '新建世界书'),
+      h('div', { className: 'wb-card-bd', style: { gap: 14 } },
+        h('label', { className: 'wb-field-label' }, '请输入世界书名称'),
+        h('input', {
+          className: 'wb-input', value: name, autoFocus: true, placeholder: '世界书名称',
+          onChange: (e) => setName(e.target.value),
+          onKeyDown: (e) => { if ((e as unknown as { key: string }).key === 'Enter' && name.trim() && !busy) { setBusy(true); props.onConfirm(name.trim()).finally(() => props.onClose()) } },
+        }),
+        h('div', { className: 'wb-actions', style: { justifyContent: 'flex-end' } },
+          h('button', { className: 'wb-btn', onClick: props.onClose }, '取消'),
+          h('button', {
+            className: 'wb-btn primary', disabled: !name.trim() || busy,
+            onClick: () => { setBusy(true); props.onConfirm(name.trim()).finally(() => props.onClose()) },
+          }, '创建'),
+        ),
+      ),
+    ),
+  )
+}
+
+function downloadWorldbook(book: StWorldBook) {
+  fetch(`/api/worldbook/worldbooks/${book.id}/export`).then(async (res) => {
+    const json = await res.json()
+    if (!json.success) throw new Error(json.message || '导出失败')
+    const blob = new Blob([json.data.json], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${book.name || 'worldbook'}-${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }).catch((e) => alert((e as Error).message))
+}
+
+function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: () => void, onSelect: (id: string) => void) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = async () => {
+    try {
+      const parsed = JSON.parse(String(reader.result))
+      // ST 世界书 JSON 顶层通常只有 entries 无 name（如 temp/原版世界书.json），名字优先取 JSON 内 name，否则取文件名（去扩展名）
+      const jsonName = typeof (parsed as { name?: unknown }).name === 'string' ? (parsed as { name: string }).name.trim() : ''
+      const fileName = jsonName || file.name.replace(/\.json$/i, '') || '导入世界书'
+      // 已有同名世界书时提示是否更新
+      const list = (await api<StWorldBook[]>('/worldbooks')) ?? []
+      const existing = fileName ? list.find((b) => b.name === fileName) : undefined
+      if (existing) {
+        const ok = confirm(`已存在世界书「${fileName}」，是否更新该世界书？（将覆盖其全部条目）`)
+        if (!ok) return
+        const res = await fetch(`/api/worldbook/worldbooks/${existing.id}/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ json: JSON.stringify(parsed) }),
+        })
+        const json = await res.json()
+        if (!json.success) throw new Error(json.message || '导入失败')
+        onSelect(existing.id)
+      } else {
+        // 无同名 → 新建一本世界书并写入条目
+        const name = fileName
+        const created = await api<StWorldBook>('/worldbooks', { method: 'POST', body: JSON.stringify({ name }) })
+        const res = await fetch(`/api/worldbook/worldbooks/${created.id}/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ json: JSON.stringify(parsed) }),
+        })
+        const json = await res.json()
+        if (!json.success) throw new Error(json.message || '导入失败')
+        onSelect(created.id)
+      }
+      onDone()
+    } catch (err) {
+      alert('导入失败：' + (err as Error).message)
+    }
+  }
+  reader.readAsText(file)
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+function blankEntry(): StWorldEntry {
+  return {
+    id: '', comment: '', content: '', keys: [], keysecondary: [], constant: false, vectorized: false,
+    selective: true, selectiveLogic: 0, insertionOrder: 100, position: 0, enabled: true, priority: null,
+    caseSensitive: null, matchWholeWords: null, scanDepth: null, useGroupScoring: null,
+    excludeRecursion: false, preventRecursion: false, delayUntilRecursion: false, probability: 100,
+    useProbability: true, depth: 4, outletName: '', group: '', groupOverride: false, groupWeight: 100,
+    sticky: null, cooldown: null, delay: null, automationId: '', role: null, triggers: [],
+    characterFilter: { isExclude: false, names: [], tags: [] },
+    matchPersonaDescription: false,
+    matchCharacterDescription: false,
+    matchCharacterPersonality: false,
+    matchCharacterDepthPrompt: false,
+    matchScenario: false,
+    matchCreatorNotes: false,
+  }
+}
+
+function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
+  const [name, setName] = useState(props.book.name)
+  const [entries, setEntries] = useState<StWorldEntry[] | null>(null)
+  const [total, setTotal] = useState(0)
+  const [msg, setMsg] = useState('')
+  const [editingEntry, setEditingEntry] = useState<StWorldEntry | null>(null)
+  const [isNew, setIsNew] = useState(false)
+  const [query, setQuery] = useState('')
+  const [sortKey, setSortKey] = useState('custom')
+  const [sortOrder, setSortOrder] = useState('asc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const contentRef = useRef<HTMLTextAreaElement | null>(null)
+  const renameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => { setName(props.book.name) }, [props.book.name])
+
+  function rename(next: string) {
+    setName(next)
+    if (renameTimer.current) clearTimeout(renameTimer.current)
+    renameTimer.current = setTimeout(() => {
+      if (next.trim()) api(`/worldbooks/${props.book.id}`, { method: 'PUT', body: JSON.stringify({ name: next.trim() }) }).then(() => { props.onChange(); setMsg('名称已保存 ✓') }).catch((e) => setMsg('保存失败：' + (e as Error).message))
+    }, 500)
+  }
+
+  const reloadEntries = useCallback(() => {
+    const params = new URLSearchParams()
+    if (query.trim()) params.set('q', query.trim())
+    params.set('sort', sortKey)
+    params.set('order', sortOrder)
+    params.set('page', String(page))
+    params.set('pageSize', String(pageSize))
+    api<{ total?: number; pageSize?: number; items?: StWorldEntry[] } | StWorldEntry[]>(`/worldbooks/${props.book.id}/entries?${params.toString()}`)
+      .then((data) => {
+        // 兼容旧格式：后端直接返回条目数组
+        if (Array.isArray(data)) { setEntries(data); setTotal(data.length); return }
+        setEntries(data?.items ?? [])
+        setTotal(data?.total ?? (data?.items?.length ?? 0))
+      })
+      .catch((e) => { setEntries([]); setMsg('加载条目失败：' + (e as Error).message) })
+  }, [props.book.id, query, sortKey, sortOrder, page, pageSize])
+
+  useEffect(() => { setMsg(''); reloadEntries() }, [reloadEntries])
+
+  useEffect(() => () => { if (searchTimer.current) clearTimeout(searchTimer.current) }, [])
+
+  function onSearch(next: string) {
+    setQuery(next)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => setPage(1), 300)
+  }
+
+  function onSort(key: string) {
+    setSortKey(key)
+    setSortOrder(SORT_HAS_DIRECTION.includes(key) ? 'asc' : 'asc')
+    setPage(1)
+  }
+  function toggleDir() {
+    setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
+    setPage(1)
+  }
+
+  async function doReorder(dragId: string, targetId: string) {
+    if (dragId === targetId || !entries) return
+    const from = entries.findIndex((e) => e.id === dragId)
+    const to = entries.findIndex((e) => e.id === targetId)
+    if (from < 0 || to < 0) return
+    const next = [...entries]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    setEntries(next)
+    try {
+      await api(`/worldbooks/${props.book.id}/entries/reorder`, { method: 'PUT', body: JSON.stringify({ orderedIds: next.map((e) => e.id) }) })
+      setMsg('顺序已更新 ✓')
+      changed(); reloadEntries()
+    } catch (e) {
+      setMsg('排序失败：' + (e as Error).message)
+    }
+  }
+
+  function patchEntry(patch: Partial<StWorldEntry>) {
+    setEditingEntry((prev) => (prev ? { ...prev, ...patch } : prev))
+  }
+
+  async function saveEntry() {
+    if (!editingEntry) return
+    const body: Record<string, unknown> = { ...editingEntry }
+    if (contentRef.current) body.content = contentRef.current.value
+    delete (body as Record<string, unknown>).id
+    if ((body as Record<string, unknown>).digest !== undefined) delete (body as Record<string, unknown>).digest
+    try {
+      if (isNew) await api(`/worldbooks/${props.book.id}/entries`, { method: 'POST', body: JSON.stringify({ entry: body }) })
+      else await api(`/worldbooks/${props.book.id}/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      setEditingEntry(null); setIsNew(false); setMsg('条目已保存 ✓')
+      changed(); reloadEntries()
+    } catch (e) {
+      setMsg('条目保存失败：' + (e as Error).message)
+    }
+  }
+
+  async function deleteEntry(id: string) {
+    if (!confirm('确定删除这条条目？')) return
+    try {
+      await api(`/worldbooks/${props.book.id}/entries/${id}`, { method: 'DELETE' })
+      setEditingEntry(null); setMsg('条目已删除'); changed(); reloadEntries()
+    } catch (e) {
+      setMsg('删除失败：' + (e as Error).message)
+    }
+  }
+
+  async function toggleEntryEnabled(en: StWorldEntry) {
+    try {
+      await api(`/worldbooks/${props.book.id}/entries/${en.id}`, { method: 'PUT', body: JSON.stringify({ enabled: !en.enabled }) })
+      changed(); reloadEntries()
+    } catch (e) {
+      setMsg('操作失败：' + (e as Error).message)
+    }
+  }
+
+  const stateName = (e: StWorldEntry) => (e.constant ? '🔵常驻' : e.vectorized ? '🔗向量' : e.enabled ? '🟢普通' : '禁用')
+
+  return h('div', { className: 'wb-card', style: { maxHeight: 560, display: 'flex', flexDirection: 'column' } },
+    h('div', { className: 'wb-card-hd' },
+      `编辑 · ${props.book.name}`,
+      h('span', { style: { flex: 1 } }),
+      msg ? h('span', { className: 'wb-hint' }, msg) : null,
+    ),
+    h('div', { className: 'wb-card-bd wb-edit-scroll', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },
+      // 书名称（实时保存）
+      h('div', { className: 'wbed-field', style: { maxWidth: 360 } },
+        h('label', { className: 'wb-field-label' }, '世界书名称'),
+        h('input', { className: 'wb-input wb-name-input', style: { width: '100%' }, value: name, onChange: (e) => rename(e.target.value) }),
+      ),
+      // 搜索 + 排序 + 方向 + 分页 + 新增条目（一行，间距统一 8px）
+      h('div', { className: 'wb-actions', style: { justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 8, columnGap: 10, alignItems: 'center' } },
+        h('div', { className: 'wb-actions', style: { gap: 8, flex: 1, minWidth: 0, alignItems: 'center' } },
+          h('input', {
+            className: 'wb-input wb-tool-input', placeholder: '搜索…', value: query,
+            style: { width: 132, flex: 'none', fontSize: 13 },
+            onChange: (e) => onSearch(e.target.value),
+          }),
+          h('select', {
+            className: 'wb-select wb-tool-select', value: sortKey, title: '条目展示顺序',
+            onChange: (e: { target: { value: string } }) => onSort(e.target.value),
+          },
+            SORT_OPTIONS.map((o) => h('option', { key: o.key, value: o.key }, o.label)),
+          ),
+          SORT_HAS_DIRECTION.includes(sortKey)
+            ? h('button', {
+              className: 'wb-btn wb-tool-btn', title: sortOrder === 'asc' ? '升序（点按切换为降序）' : '降序（点按切换为升序）',
+              onClick: toggleDir,
+            }, sortOrder === 'asc' ? '↑' : '↓')
+            : null,
+        ),
+        // 分页：上一页 / 第 x/y 页 / 每页条数下拉 / 下一页
+        h('div', { className: 'wb-actions', style: { gap: 8, alignItems: 'center' } },
+          h('button', { className: 'wb-btn wb-tool-btn wb-pager-btn', disabled: page <= 1, onClick: () => setPage((p) => Math.max(1, p - 1)) }, '‹  上一页'),
+          h('span', { className: 'wb-hint', style: { whiteSpace: 'nowrap', fontSize: 12 } }, `第 ${page}/${Math.max(1, Math.ceil(total / pageSize))} 页`),
+          h('select', {
+            className: 'wb-select wb-pagesize-select', value: String(pageSize), title: '每页条数',
+            onChange: (e: { target: { value: string } }) => { setPageSize(Number(e.target.value)); setPage(1) },
+          },
+            [10, 20, 50].map((n) => h('option', { key: n, value: String(n) }, `${n} 条`)),
+          ),
+          h('button', { className: 'wb-btn wb-tool-btn wb-pager-btn', disabled: page >= Math.ceil(total / pageSize), onClick: () => setPage((p) => p + 1) }, '下一页  ›'),
+        ),
+        h('button', { className: 'wb-btn primary', style: { flex: 'none' }, onClick: () => { setEditingEntry(blankEntry()); setIsNew(true) } }, '＋ 新增条目'),
+      ),
+      h('div', { className: 'wb-actions', style: { justifyContent: 'space-between' } },
+        h('div', { className: 'wb-hint', style: { fontWeight: 700, color: '#d85b87' } }, `条目 · ${total}${query.trim() ? '（含搜索）' : ''}${sortKey === 'custom' ? ' · 可拖动 ⋮⋮ 调整自定义顺序' : ''}`),
+      ),
+      entries === null
+        ? h('div', { className: 'wb-hint' }, '加载中…')
+        : !entries || entries.length === 0
+          ? h('div', { className: 'wb-hint' }, '暂无条目，点「＋ 新增条目」创建，或对书本「导入」ST JSON。')
+          : entries.map((en) =>
+            h('div', {
+              key: en.id,
+              className: 'wb-row' + (dragging === en.id ? ' wb-row-dragging' : ''),
+              style: { padding: '8px 12px' },
+              draggable: false,
+            },
+              // 自定义排序：仅三条杠可拖（避免与滚动/点击冲突）
+              sortKey === 'custom'
+                ? h('span', {
+                  className: 'wbed-grip' + (dragging === en.id ? ' active' : ''),
+                  draggable: true, title: '拖动调整自定义顺序',
+                  onDragStart: (e) => { setDragging(en.id); (e as unknown as { dataTransfer: DataTransfer }).dataTransfer.effectAllowed = 'move' },
+                  onDragEnd: () => setDragging(null),
+                  onDragOver: (e) => e.preventDefault(),
+                  onDrop: (e) => { e.preventDefault(); if (dragging) doReorder(dragging, en.id) },
+                }, '⋮⋮')
+                : null,
+              h('div', { style: { flex: 1, minWidth: 0, cursor: 'pointer' }, onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } },
+                h('div', { className: 'wb-name' }, (en.comment || '（无标题）')),
+                h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } },
+                  `${stateName(en)} · 顺序 ${en.insertionOrder} · ${en.keys.length ? en.keys.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
+              ),
+              h('button', {
+                className: 'wb-btn' + (en.enabled ? '' : ' muted'),
+                style: en.enabled
+                  ? { color: '#2f9e63', borderColor: '#b8e0c8', background: '#eefaf3' }
+                  : { color: '#a88896', borderColor: 'var(--ml-line)' },
+                title: '点击切换启用/停用',
+                onClick: () => toggleEntryEnabled(en),
+              }, en.enabled ? '✓ 已启用' : '○ 未启用'),
+              h('button', { className: 'wb-btn', onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } }, '编辑'),
+              h('button', { className: 'wb-btn danger', onClick: () => deleteEntry(en.id) }, '删除'),
+            ),
+          ),
+    ),
+    editingEntry ? h(EntryEditorModal, {
+      entry: editingEntry, isNew, onChange: patchEntry, onSave: saveEntry,
+      onClose: () => { setEditingEntry(null); setIsNew(false) },
+      contentRef,
+    }) : null,
+  )
+}
+
+function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange: (p: Partial<StWorldEntry>) => void; onSave: () => void; onClose: () => void; contentRef: React.RefObject<HTMLTextAreaElement | null> }) {
+  const en = props.entry
+  const set = props.onChange
+  const tri = (v: boolean | null) => (v === null ? '' : String(v))
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [stateOpen, setStateOpen] = useState(false)
+  const entryState = en.constant ? { icon: '🔵', label: '常驻' } : en.vectorized ? { icon: '🔗', label: '向量' } : { icon: '🟢', label: '普通' }
+  const setState = (constant: boolean, vectorized: boolean) => { set({ constant, vectorized }); setStateOpen(false) }
+  useEffect(() => {
+    if (!stateOpen) return
+    const close = () => setStateOpen(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [stateOpen])
+
+  return h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' } },
+    h('div', { className: 'wb-card', style: { width: 'min(860px, 96vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column' } },
+      h('div', { className: 'wb-card-hd' },
+        props.isNew ? '新增条目' : '编辑条目',
+        h('span', { style: { flex: 1 } }),
+        h('button', { className: 'wbed-btn', onClick: props.onClose }, '关闭'),
+      ),
+      h('main', { className: 'wbed-body', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },
+        // 条目标题（独立一行）
+        h('div', { className: 'wbed-field' },
+          h('label', { className: 'wbed-label' }, '条目标题'),
+          h('input', { className: 'wbed-input', placeholder: '条目标题', value: en.comment ?? '', onChange: (e) => set({ comment: e.target.value }) }),
+        ),
+        // 状态灯 / 位置 / 深度 / 顺序 / 触发%（一排 5 个，状态灯在最左侧）
+        h('div', { className: 'wbed-grid5' },
+            h('div', { className: 'wbed-field wbed-num', style: { position: 'relative' } },
+              h('label', { className: 'wbed-label' }, '状态'),
+              h('button', { className: 'wbed-state-btn', onClick: (e: { stopPropagation: () => void }) => { e.stopPropagation(); setStateOpen(!stateOpen) }, type: 'button', title: '条目状态：常驻无条件注入 / 普通按触发词 / 向量按向量（本项目按常驻处理）' },
+                h('span', { className: 'wbed-state-icon' }, entryState.icon),
+                h('span', null, entryState.label),
+                h('span', { className: 'wbed-state-caret' }, '▾'),
+              ),
+              stateOpen && h('div', { className: 'wbed-state-menu' },
+                h('button', { type: 'button', className: 'wbed-state-option' + (en.constant ? ' active' : ''), onClick: () => setState(true, false) }, h('span', null, '🔵'), '常驻'),
+                h('button', { type: 'button', className: 'wbed-state-option' + (!en.constant && !en.vectorized ? ' active' : ''), onClick: () => setState(false, false) }, h('span', null, '🟢'), '普通'),
+                h('button', { type: 'button', className: 'wbed-state-option' + (en.vectorized ? ' active' : ''), onClick: () => setState(false, true) }, h('span', null, '🔗'), '向量'),
+              ),
+            ),
+            h('div', { className: 'wbed-field wbed-num' },
+              h('label', { className: 'wbed-label' }, '位置'),
+              h('select', { className: 'wbed-select', value: String(en.position), onChange: (e: { target: { value: string } }) => set({ position: Number(e.target.value) }) },
+                POSITION_OPTIONS.map((o) => h('option', { key: o.value, value: String(o.value) }, o.label)),
+              ),
+            ),
+            h('div', { className: 'wbed-field wbed-num' },
+              h('label', { className: 'wbed-label' }, '深度'),
+              h('input', { className: 'wbed-input', type: 'number', value: en.scanDepth === null ? '' : String(en.scanDepth), onChange: (e) => set({ scanDepth: e.target.value === '' ? null : Number(e.target.value) }) }),
+            ),
+            h('div', { className: 'wbed-field wbed-num' },
+              h('label', { className: 'wbed-label' }, '顺序'),
+              h('input', { className: 'wbed-input', type: 'number', value: String(en.insertionOrder), onChange: (e) => set({ insertionOrder: Number(e.target.value) || 0 }) }),
+            ),
+            h('div', { className: 'wbed-field wbed-num' },
+              h('label', { className: 'wbed-label' }, '触发 %'),
+              h('input', { className: 'wbed-input', type: 'number', min: 0, max: 100, value: String(en.probability), onChange: (e) => set({ probability: Number(e.target.value) || 0 }) }),
+            ),
+          ),
+          // 主要关键字 + 可选过滤器（同一行，响应式，长度受限）
+          h('div', { className: 'wbed-row2' },
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '主要关键字'),
+              h('input', { className: 'wbed-input', placeholder: '逗号分隔列表', value: en.keys.join(', '), onChange: (e) => set({ keys: splitCsv(e.target.value) }) }),
+            ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '可选过滤器'),
+              h('input', { className: 'wbed-input', placeholder: '逗号分隔列表（如果为空则忽略）', value: en.keysecondary.join(', '), onChange: (e) => set({ keysecondary: splitCsv(e.target.value) }) }),
+            ),
+          ),
+          // 逻辑（独立一行，长度小）
+          h('div', { className: 'wbed-field wbed-num' },
+            h('label', { className: 'wbed-label' }, '逻辑'),
+            h('select', { className: 'wbed-select', value: String(en.selectiveLogic), onChange: (e: { target: { value: string } }) => set({ selectiveLogic: Number(e.target.value) as 0 | 1 | 2 | 3 }) },
+              LOGIC_OPTIONS.map((o) => h('option', { key: o.value, value: String(o.value) }, o.label)),
+            ),
+          ),
+          // 区分大小写 / 完整单词 / 组评分 / 自动化ID
+          h('div', { className: 'wbed-grid4' },
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '区分大小写'),
+              h('select', { className: 'wbed-select', value: tri(en.caseSensitive), onChange: (e: { target: { value: string } }) => set({ caseSensitive: e.target.value === '' ? null : e.target.value === 'true' }) },
+                TRI_OPTIONS.map((o) => h('option', { key: o.value, value: o.value }, o.label)),
+              ),
+            ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '完整单词'),
+              h('select', { className: 'wbed-select', value: tri(en.matchWholeWords), onChange: (e: { target: { value: string } }) => set({ matchWholeWords: e.target.value === '' ? null : e.target.value === 'true' }) },
+                TRI_OPTIONS.map((o) => h('option', { key: o.value, value: o.value }, o.label)),
+              ),
+            ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '组评分'),
+              h('select', { className: 'wbed-select', value: tri(en.useGroupScoring), onChange: (e: { target: { value: string } }) => set({ useGroupScoring: e.target.value === '' ? null : e.target.value === 'true' }) },
+                TRI_OPTIONS.map((o) => h('option', { key: o.value, value: o.value }, o.label)),
+              ),
+            ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '自动化 ID'),
+              h('input', { className: 'wbed-input', value: en.automationId, onChange: (e) => set({ automationId: e.target.value }) }),
+            ),
+          ),
+          // 选择性 / 递归 / 概率 开关
+          h('div', { className: 'wbed-checks' },
+            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.selective, onChange: (e) => set({ selective: e.target.checked }) }), h('span', null, '选择性（启用副触发词限制）')),
+            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.excludeRecursion, onChange: (e) => set({ excludeRecursion: e.target.checked }) }), h('span', null, '不可递归（不会被其他条目激活）')),
+            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.delayUntilRecursion !== false, onChange: (e) => set({ delayUntilRecursion: e.target.checked ? 1 : false }) }), h('span', null, '延迟到递归')),
+            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.preventRecursion, onChange: (e) => set({ preventRecursion: e.target.checked }) }), h('span', null, '防止进一步递归')),
+            h('label', { className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en.useProbability, onChange: (e) => set({ useProbability: e.target.checked }) }), h('span', null, '无视回复概率')),
+          ),
+          // 内容（大文本非受控：击键不触发弹窗重渲染，保存时才取值）
+          h(ContentArea, { textareaRef: props.contentRef, initial: en.content }),
+          // 包含组 / 组权重 / 粘性 / 冷却 / 延迟
+          h('div', { className: 'wbed-effect-grid' },
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '包含组 ', h('span', { className: 'wbed-help' }, '?')),
+              h('label', { className: 'wbed-inline-check' }, h('input', { type: 'checkbox', checked: en.groupOverride, onChange: (e: { target: { checked: boolean } }) => set({ groupOverride: e.target.checked }) }), h('span', null, '确定优先级')),
+              h('input', { className: 'wbed-input', placeholder: '只有一个带有相同标签', value: en.group, onChange: (e: { target: { value: string } }) => set({ group: e.target.value }) }),
+            ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '组权重'),
+              h('input', { className: 'wbed-input', type: 'number', min: 1, value: String(en.groupWeight), onChange: (e: { target: { value: string } }) => set({ groupWeight: Number(e.target.value) || 100 }) }),
+            ),
+            h('div', { className: 'wbed-field' },
+              h('label', { className: 'wbed-label' }, '粘性 💬'),
+              h('select', { className: 'wbed-select', value: en.sticky === null ? '' : String(en.sticky), onChange: (e: { target: { value: string } }) => set({ sticky: e.target.value === '' ? null : Number(e.target.value) }) },
+                h('option', { value: '' }, '无粘性'),
+                h('option', { value: '1' }, '1 轮'),
+                h('option', { value: '2' }, '2 轮'),
+              ),
+            ),
+            h('div', { className: 'wbed-field', style: { gridColumn: 4 } },
+              h('label', { className: 'wbed-label' }, '冷却 💬'),
+              h('select', { className: 'wbed-select', value: en.cooldown === null ? '' : String(en.cooldown), onChange: (e: { target: { value: string } }) => set({ cooldown: e.target.value === '' ? null : Number(e.target.value) }) },
+                h('option', { value: '' }, '无冷却'),
+                h('option', { value: '1' }, '1 轮'),
+              ),
+            ),
+          ),
+          // 额外匹配来源
+          h('section', { className: 'wbed-section' },
+            h('div', { className: 'wbed-section-head' },
+              h('span', { className: 'wbed-accent' }), '额外匹配来源',
+              h('button', { className: 'wbed-fold', style: { marginLeft: 'auto', width: 32, height: 32, background: '#fff0f5', color: '#d85d89' }, onClick: () => setSourcesOpen(!sourcesOpen) }, sourcesOpen ? '⌃' : '⌄'),
+            ),
+            sourcesOpen && h('div', { className: 'wbed-sources' },
+              [
+                { label: '角色描述', key: 'matchPersonaDescription' as const },
+                { label: '用户设定描述', key: 'matchCharacterDescription' as const },
+                { label: '角色性格', key: 'matchCharacterPersonality' as const },
+                { label: '角色备注', key: 'matchCharacterDepthPrompt' as const },
+                { label: '情景', key: 'matchScenario' as const },
+                { label: '创作者的注释', key: 'matchCreatorNotes' as const },
+              ].map(({ label, key }) => h('label', { key, className: 'wbed-check' }, h('input', { type: 'checkbox', checked: en[key], onChange: (e: { target: { checked: boolean } }) => set({ [key]: e.target.checked }) }), h('span', null, label))),
+            ),
+          ),
+        ),
+        h('footer', { className: 'wbed-footer' },
+          h('div', { className: 'wbed-foot' },
+            h('span', null, '世界书条目 · UID: ', String(en.position + 1)),
+            h('button', { className: 'wbed-btn', onClick: props.onClose }, '取消'),
+            h('button', { className: 'wbed-btn primary', onClick: props.onSave }, '保存条目'),
+          ),
+        ),
+      ),
+  )
+}
+
+function splitCsv(s: string): string[] {
+  const out: string[] = []
+  for (const part of s.split(',')) {
+    const p = part.trim()
+    if (p) out.push(p)
+  }
+  return out
+}
+
+// 内容编辑区：textarea 非受控（仅初始值 + ref），输入不触发弹窗重渲染；字符计数用独立 state
+function ContentArea(props: { textareaRef: React.RefObject<HTMLTextAreaElement | null>; initial: string }) {
+  const [len, setLen] = useState(props.initial.length)
+  const [expanded, setExpanded] = useState(false)
+  return h('div', null,
+    h('div', { className: 'wbed-content-title' },
+      h('b', null, '内容'),
+      h('button', { className: 'wbed-expand', title: expanded ? '收起' : '展开（全屏）', onClick: () => setExpanded(!expanded) }, expanded ? '⛶' : '⛶'),
+      h('span', { className: 'wbed-content-title' }, `（Token：${len}）`),
+    ),
+    h('textarea', {
+      className: 'wbed-area' + (expanded ? ' wbed-area-expanded' : ''),
+      placeholder: '这个关键词对 AI 的含义，逐字发送',
+      defaultValue: props.initial,
+      ref: props.textareaRef,
+      onInput: (e: { target: { value: string } }) => setLen((e.target as HTMLTextAreaElement).value.length),
+    }),
+  )
+}
+
+function toggleField(label: string, checked: boolean, onChange: (v: boolean) => void) {
+  return h('label', { style: { display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: '#705a65' } },
+    h('span', { style: { flex: 1 } }, label),
+    h('input', { type: 'checkbox', style: { accentColor: 'var(--ml-pink-5)', width: 18, height: 18 }, checked, onChange: (e: { target: { checked: boolean } }) => onChange(e.target.checked) }),
+  )
+}
+
+export { WorldbooksPage }
