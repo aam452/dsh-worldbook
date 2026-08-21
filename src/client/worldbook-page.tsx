@@ -201,12 +201,12 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
         h('button', { className: 'wb-btn', disabled: !selected, onClick: () => selected && downloadWorldbook(selected) }, '导出'),
         h('label', { className: 'wb-btn', style: { cursor: 'pointer' } },
           '导入',
-          h('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' }, onChange: (e) => onWorldbookImport(e, () => { setMsg('导入成功 ✓'); refresh() }, (id) => setSelectedId(id)) }),
+          h('input', { type: 'file', accept: '.json,.png,application/json,image/png', style: { display: 'none' }, onChange: (e) => onWorldbookImport(e, () => { setMsg('导入成功 ✓'); refresh() }, (id) => setSelectedId(id)) }),
         ),
       ),
       h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },
         bookList.length === 0
-          ? h('div', { className: 'wb-hint' }, '还没有世界书，点「＋ 新建世界书」创建一本，或用「导入」读取 ST 世界书 JSON。')
+          ? h('div', { className: 'wb-hint' }, '还没有世界书，点「＋ 新建世界书」创建一本，或用「导入」读取 ST 世界书 JSON / 角色卡。')
           : bookList.map((book) =>
             h('div', {
               key: book.id,
@@ -290,13 +290,24 @@ function downloadWorldbook(book: StWorldBook) {
 function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: () => void, onSelect: (id: string) => void) {
   const file = e.target.files?.[0]
   if (!file) return
+  const isPng = /\.png$/i.test(file.name)
   const reader = new FileReader()
   reader.onload = async () => {
     try {
-      const parsed = JSON.parse(String(reader.result))
+      // 角色卡 PNG：解析 tEXt 分块（ccv3 优先，其次 chara），base64 解码得到内嵌世界书 JSON；JSON 文件直接读文本。
+      const rawText = isPng ? extractCardJsonFromPng(reader.result as ArrayBuffer) : String(reader.result)
+      if (rawText === null) throw new Error(UNRECOGNIZED_WORLDBOOK)
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(rawText)
+      } catch {
+        throw new Error(UNRECOGNIZED_WORLDBOOK)
+      }
+      // 从角色卡 JSON 抽取世界书对象（CCv2/CCv3），纯世界书 JSON 原样返回；剔除角色数据只导入世界书。
+      const worldRoot = pickCharacterBook(parsed) ?? parsed
       // ST 世界书 JSON 顶层通常只有 entries 无 name（如 temp/原版世界书.json），名字优先取 JSON 内 name，否则取文件名（去扩展名）
-      const jsonName = typeof (parsed as { name?: unknown }).name === 'string' ? (parsed as { name: string }).name.trim() : ''
-      const fileName = jsonName || file.name.replace(/\.json$/i, '') || '导入世界书'
+      const jsonName = typeof (worldRoot as { name?: unknown }).name === 'string' ? (worldRoot as { name: string }).name.trim() : ''
+      const fileName = jsonName || file.name.replace(/\.(json|png)$/i, '') || '导入世界书'
       // 已有同名世界书时提示是否更新
       const list = (await api<StWorldBook[]>('/worldbooks')) ?? []
       const existing = fileName ? list.find((b) => b.name === fileName) : undefined
@@ -326,11 +337,71 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
       }
       onDone()
     } catch (err) {
-      await showAlert({ title: '导入失败', message: (err as Error).message })
+      const message = (err as Error).message
+      // 格式识别失败（含服务端报的条目格式错误）统一提示未识别
+      await showAlert({ title: '导入失败', message: /不是合法 JSON|顶层必须是对象|缺少 entries|条目 .* 必须是对象/.test(message) ? UNRECOGNIZED_WORLDBOOK : message })
     }
   }
-  reader.readAsText(file)
+  if (isPng) reader.readAsArrayBuffer(file)
+  else reader.readAsText(file)
   ;(e.target as HTMLInputElement).value = ''
+}
+
+const UNRECOGNIZED_WORLDBOOK = '未识别到有效的世界书格式'
+
+// 从角色卡 JSON 顶层抽取世界书对象（与服务端 pickCharacterBook 一致）：CCv2 在顶层，CCv3 在 data.character_book。
+function pickCharacterBook(parsed: unknown): Record<string, unknown> | null {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  const root = parsed as Record<string, unknown>
+  if (typeof root.character_book === 'object' && root.character_book !== null && !Array.isArray(root.character_book)) {
+    return root.character_book as Record<string, unknown>
+  }
+  const data = root.data
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const inner = (data as Record<string, unknown>).character_book
+    if (typeof inner === 'object' && inner !== null && !Array.isArray(inner)) {
+      return inner as Record<string, unknown>
+    }
+  }
+  return null
+}
+
+// 解析角色卡 PNG：定位 tEXt 分块（ccv3 优先、chara 兜底），返回分块内 base64 解码后的世界书 JSON 文本。
+function extractCardJsonFromPng(buffer: ArrayBuffer): string | null {
+  const bytes = new Uint8Array(buffer)
+  // PNG 签名 89 50 4E 47 0D 0A 1A 0A
+  if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return null
+  const view = new DataView(buffer)
+  let offset = 8
+  let chara: string | null = null
+  while (offset + 8 <= bytes.length) {
+    const length = view.getUint32(offset)
+    const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7])
+    if (type === 'tEXt') {
+      const dataStart = offset + 8
+      // 关键字与文本用 0x00 分隔
+      let nul = dataStart
+      while (nul < dataStart + length && bytes[nul] !== 0) nul++
+      const keyword = String.fromCharCode(...bytes.subarray(dataStart, nul))
+      const textBytes = bytes.subarray(nul + 1, dataStart + length)
+      const text = decodeBase64(textBytes)
+      if (keyword === 'ccv3') return text
+      if (keyword === 'chara' && chara === null) chara = text
+    }
+    offset += 12 + length
+  }
+  return chara
+}
+
+// 解码 PNG tEXt 分块中的 base64 文本（分块文本为 Latin-1，先还原成字节再按 UTF-8 解码）。
+function decodeBase64(latin1: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < latin1.length; i++) binary += String.fromCharCode(latin1[i])
+  const clean = binary.replace(/[\r\n]+/g, '')
+  const raw = atob(clean)
+  const bytes = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+  return new TextDecoder('utf-8').decode(bytes)
 }
 
 function blankEntry(): StWorldEntry {
@@ -532,7 +603,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
         entries === null
           ? h('div', { className: 'wb-hint' }, '加载中…')
           : !entries || entries.length === 0
-            ? h('div', { className: 'wb-hint' }, '暂无条目，点「＋ 新增条目」创建，或对书本「导入」ST JSON。')
+            ? h('div', { className: 'wb-hint' }, '暂无条目，点「＋ 新增条目」创建，或对书本「导入」ST JSON / 角色卡。')
             : entries.map((en) =>
               h('div', {
                 key: en.id,

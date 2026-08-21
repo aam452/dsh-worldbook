@@ -40,20 +40,25 @@ DeepSeek Harness版本：**0.1.0-rc.8**。其它版本未测试
 
 ```bash
 dsh plugin --profile web add github:aam452/dsh-worldbook
-dsh --profile web
-```
-
-也可以不依赖全局安装，用 `npx` 拉取最新版 CLI：
-
-```bash
-npx -p @deepseek-ai/dsh@latest dsh plugin --profile web add github:aam452/dsh-worldbook
-npx -p @deepseek-ai/dsh@latest dsh --profile web
 ```
 
 - 更新插件：
 
 ```bash
 dsh plugin --profile web update dsh-worldbook
+```
+
+- 卸载插件
+
+```
+```
+
+### 方式二：npx安装
+也可以不依赖全局安装，用 `npx` 拉取最新版 CLI：
+
+```bash
+npx -p @deepseek-ai/dsh@latest dsh plugin --profile web add github:aam452/dsh-worldbook
+npx -p @deepseek-ai/dsh@latest dsh --profile web
 ```
 
 ### 方式二：从源码安装（开发 / 二次开发用）
