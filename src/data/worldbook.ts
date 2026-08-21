@@ -350,6 +350,8 @@ function advancedFrom(src: Record<string, unknown>): Record<string, unknown> {
   for (const key of ['outletName', 'group', 'groupOverride', 'groupWeight', 'automationId', 'role', 'triggers', 'useGroupScoring', 'delayUntilRecursion', 'characterFilter', 'matchPersonaDescription', 'matchCharacterDescription', 'matchCharacterPersonality', 'matchCharacterDepthPrompt', 'matchScenario', 'matchCreatorNotes', 'useProbability']) {
     if (src[key] !== undefined) out[key] = src[key]
   }
+  // 工具 schema 的 enum 用字符串（Gemini 要求），这里把 role 转回数字存储。
+  if (typeof out.role === 'string' && out.role !== '') out.role = num(out.role, 0)
   return { ...raw, ...out }
 }
 

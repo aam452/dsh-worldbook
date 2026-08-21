@@ -74,17 +74,17 @@ const ENTRY_FIELDS = {
   content: { type: 'string', description: '条目内容（注入模型上下文的文本）。' },
   constant: { type: 'boolean', description: '常驻：无条件始终注入。' },
   selective: { type: 'boolean', description: '选择性：需结合副关键词。' },
-  selectiveLogic: { type: 'integer', enum: [0, 1, 2, 3], description: '0=AND ANY 1=NOT ALL 2=NOT ANY 3=AND ALL' },
+  selectiveLogic: { type: 'string', enum: ['0', '1', '2', '3'], description: '0=AND ANY 1=NOT ALL 2=NOT ANY 3=AND ALL' },
   insertionOrder: { type: 'integer', description: '注入优先级（越大越优先，list_entries 返回该字段名）。' },
   order: { type: 'integer', description: '注入优先级别名，等价于 insertionOrder（ST 导出字段名）。' },
-  position: { type: 'integer', enum: [0, 1, 2, 3, 4, 5, 6, 7], description: '注入位置（ST position 枚举）。' },
+  position: { type: 'string', enum: ['0', '1', '2', '3', '4', '5', '6', '7'], description: '注入位置（ST position 枚举，0=before_char 1=after_char 4=@D）。' },
   enabled: { type: 'boolean', description: '是否启用该条目。' },
   priority: { type: 'integer', description: '优先级（ST priority 字段，0-100，高优先级覆盖 order）。' },
   vectorized: { type: 'boolean', description: '向量化。' },
   group: { type: 'string', description: '所属分组（组内按 order 胜出）。' },
   groupOverride: { type: 'boolean', description: '组内强制覆盖。' },
   groupWeight: { type: 'integer', description: '组权重。' },
-  role: { type: 'integer', enum: [0, 1, 2], description: '@D 位置角色：0=系统 1=用户 2=AI。' },
+  role: { type: 'string', enum: ['0', '1', '2'], description: '@D 位置角色：0=系统 1=用户 2=AI。' },
   triggers: { type: 'array', items: { type: 'string' }, description: '触发器（高级字段）。' },
   caseSensitive: { type: 'boolean', description: '关键词是否区分大小写。' },
   matchWholeWords: { type: 'boolean', description: '整词匹配。' },
@@ -98,7 +98,7 @@ const ENTRY_FIELDS = {
   sticky: { type: 'integer', description: '粘性（命中后 N 条消息内强制注入）。' },
   cooldown: { type: 'integer', description: '冷却（命中后 N 条消息内不再注入）。' },
   delay: { type: 'integer', description: '延迟（cursor < delay 时强制注入）。' },
-} as const satisfies Record<string, { type: 'string' | 'boolean' | 'integer' | 'array'; items?: { type: 'string' }; enum?: readonly number[]; description?: string }>
+} as const satisfies Record<string, { type: 'string' | 'boolean' | 'integer' | 'array'; items?: { type: 'string' }; enum?: readonly string[]; description?: string }>
 
 function pick<T extends Record<string, unknown>>(args: T, keys: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
