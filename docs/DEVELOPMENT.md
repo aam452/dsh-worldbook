@@ -186,17 +186,75 @@ const world = renderWorldbookInjection(textLines, { cursor })
 
 要点：
 - 管理页两个槽（`nav` / `settings`）渲染同一份内容，**只挂载其中一个**；设置卡片（`settings-card`）单独挂载到设置页。
-- 槽条目变化要**订阅监听**，不要假设加载顺序；未读到条目时可按需回退到你自己的兜底界面。
-- 槽里的组件必须返回 React 元素。
+- 未读到条目时可按需回退到你自己的兜底界面。
 - 若宿主不需要本插件 UI，可只用 REST API 或 `renderWorldbookInjection`（见第三/四/五章），完全脱离槽位。
 
-### 6.4 集成约束
+硬性约束与常见问题见 6.4、6.5。
+
+### 6.4 集成约束（必须遵守，否则必然出问题）
 
 - 组件必须返回 React 元素（返回原生 DOM 会报 `Minified React error #31`）。
-- 用 `subscribe` 监听变化，不要假设加载顺序。
-- 若宿主不想用本插件 UI，也可只用 REST API 或 `renderWorldbookInjection`（见第三/四/五章），完全脱离槽位。
-- 主题：本插件样式限定在 `.dsh-worldbook-root` 作用域，宿主开启时不污染宿主；宿主关闭时独立主题完整可用。
+- 用 `subscribe` 监听变化，不要假设加载顺序；槽条目变化要重新同步。
+- 主题：本插件样式限定在 `.dsh-worldbook-root` 作用域，宿主开启时不污染宿主；宿主关闭时独立主题完整可用。主题开发注意点见第七章。
 
-## 七、开源与协议
+### 6.5 可能出现的问题（特定场景下才会出现，留意规避）
+
+- **契约页与宿主滚动/固定底栏的布局（Bottom-nav content overlap）**：
+  - **触发条件**：宿主把契约页放进自己的**外部滚动容器**（整页滚动），且该容器底部有**固定浮层**（底部导航 / TabBar）。
+  - **成因**：契约页根容器 `.dsh-worldbook-root` 由 `WithRoot` 渲染，带 `height: 100%` 内联样式，默认按「填满宿主给定高度、内部自滚动」设计。放入外部滚动容器后，`height: 100%` 把世界书内容限死在可视高度内，内容一旦超高就溢出，压穿宿主滚动容器的 `padding-bottom`，导致**滚动到底时最后条目被固定底栏遮挡**。
+  - **规避**：让契约页根容器高度自适应（覆盖为 `height: auto`），由宿主滚动容器统一滚动，并用宿主滚动容器的**底部 padding** 为固定底栏预留空间。世界书页内 `max-height + overflow` 的卡片内滚动不受影响，仍正常工作。
+
+## 七、主题开发
+
+本插件的 UI 主题有两态：**跟随 DSH**（默认）与**粉色独立主题**（可选）。主题相关代码全部在 client 半：`src/client/theme.css`、`src/client/wb-theme.ts`、`src/client/client.ts`（`WithRoot`）。
+
+### 7.1 主题机制
+
+- **默认是「跟随 DSH」**：插件设置 `theme: 'dsh'`，UI 根容器加 `.dsh-theme` 类。
+- **粉色是可选独立主题**（`theme: 'pink'`）：根容器**不加** `.dsh-theme` 类，使用 theme.css 里 `.dsh-worldbook-root` 上定义的粉色变量。
+- 所有颜色一律经内部 `--ml-*` 变量路由，**组件里绝不硬编码色值**。`.dsh-theme` 只是把 `--ml-*` 映射到 dsh 的语义 token，因此：
+  - 跟随 DSH 时，颜色随 dsh 明暗自动切换；
+  - 粉色时，颜色用 theme.css 顶部的粉色变量。
+
+### 7.2 dsh 统一颜色 token 的权威位置
+
+`--dsw-alias-*` 语义 token（Semantic Token）来自 dsh 的 **`@deepseek-ai/dsh-client-ui-theme`** 包，在 DeepSeek Harness 仓库 **`packages/client/ui-theme/`**：
+
+- **类型定义**：`src/client/index.ts` 的 `BUILTIN_INSPECT_TOKENS`
+- **样式源**：`src/styles/design-platform.css`
+- **运行时定义处**：注入的 `<style data-plugin-css="@deepseek-ai/dsh-client-ui-theme/design-platform.css">`，选择器为 **`body`（明色）** 与 **`body[data-ds-dark-theme]`（暗色）**，两组各自完整声明。
+
+只要本插件根在 body 内，`var(--dsw-alias-*)` 就随 dsh 明暗切换自动更新，无需自己监听主题变化。
+
+常用取值（明色）：`bg-layer-1/2/3`=#fff、`bg-overlay`=#e9ecf2（灰）、`label-primary`=#0f1115、`label-secondary`=#61666b、`label-tertiary`=#81858c、`state-business-primary`=#4176e6（蓝）、`border-l1`=#0000000a、`border-l2`=#0000001a。
+
+### 7.3 token 的两层与精细度
+
+dsh 的 token 分两层，**写主题时要知道用哪层**：
+
+| 层 | 前缀 | 特点 | 精细度 |
+| --- | --- | --- | --- |
+| 语义层 | `--dsw-alias-*` | 角色层面，一个语义位一个值（如 `state-business-primary` 只有一个蓝）；随明暗自动切换 | **低**：同色系深浅会多对一撞值 |
+| 色板层 | `--dsw-static-*` | 完整色阶（如 `neutral-bluish-00~1000` 十几级），固定色值 | **高**：能表达深浅渐变，但**不随明暗变化** |
+
+结论：
+- 结构/背景/文字用**语义层**（自动跟随明暗），代价是色阶少；
+- 需要"同色系深浅渐变"（hover 深、正文中、边框浅）时用**色板层**，但要在暗色下**自行补一套覆盖**——dsh 自己也是"明暗两套值"这么做的。
+- **不要**把语义层 token 当正文色用（例如把 `state-business-primary`（蓝）映射给标题文字），那是视觉事故（蓝字）的根源。
+
+### 7.4 映射要点（视觉约定）
+
+- 标题/正文文字用 `label-*`（中性色），**不要**用 `state-business-primary`（蓝）当正文色。
+- 卡片背景用 `bg-layer-*`（正常表面），**不要**用 `bg-overlay`（那是浮层灰）。
+- 蓝色只保留给强调控件：选中态、开关、勾选框、focus 环、主按钮渐变。
+- 模态遮罩用 `var(--ml-mask)`，不要硬编码 `rgba(0,0,0,.4)` 之类。
+
+### 7.5 常见坑
+
+- **不要给子容器重复加 `.dsh-worldbook-root` 类**：该类规则会在该元素上直接声明粉色变量，覆盖外层 `.dsh-theme` 的映射，导致该元素永远粉色（ConfirmHost 曾踩过：确认框套了自己的 `.dsh-worldbook-root` 根类，结果粉色无法跟随 DSH）。子容器应去掉根类，让变量从父级继承。
+- **新增 UI 元素一律走 `--ml-*` 变量**，不要在 tsx 里写死 `#hex` / `rgba`。
+- 修改映射前，先到 7.2 的运行时 `<style>` 里核对 token 是否存在、明暗取值，避免 `var()` 失效回落到默认。
+
+## 八、开源与协议
 
 MIT。开发文档、测试、代码均公开。集成与二次开发均欢迎。

@@ -1,5 +1,6 @@
 // 世界书主题的同步缓存：主题是后端异步设置，React 首帧拿不到，
-// 靠这个缓存让首帧直接用上次的值，避免「先粉色、再切 dsh」的闪烁。
+// 靠这个缓存让首帧直接用上次的值，避免「先默认、再跳变」的闪烁。
+// 默认主题为 dsh（跟随 DSH），无缓存时即返回 'dsh'。
 export type WorldbookTheme = 'pink' | 'dsh'
 
 const CACHE_KEY = 'dsh-worldbook-theme'

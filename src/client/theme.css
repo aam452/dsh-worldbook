@@ -1,8 +1,9 @@
-/* dsh-worldbook 独立主题。
- * 所有颜色都经由 --ml-* 变量路由；`.dsh-theme`（跟随 dsh）把 --ml-* 映射到 dsh 的
- * --dsw-alias-* 语义 token（在 body 上按明暗主题解析），关闭时回落到粉色默认值。 */
+/* dsh-worldbook 主题。
+ * 默认主题是「跟随 DSH」：`.dsh-theme` 类把 --ml-* 映射到 dsh 的 --dsw-alias-* 语义
+ * token（在 body / body[data-ds-dark-theme] 上按明暗解析，随 dsh 自动切换）。
+ * 「粉色」是可选的独立主题（用户手动选择），下面这组粉色变量仅在该状态生效。 */
 .dsh-worldbook-root {
-  /* 粉色变量（浅色默认） */
+  /* 粉色独立主题的变量（仅在无 .dsh-theme 时生效） */
   --ml-pink-0: #fff0f5;
   --ml-pink-1: #ffe4ec;
   --ml-pink-2: #ffd0df;
@@ -70,8 +71,25 @@
 }
 
 /* 跟随 DSH 主题：把世界书用到的 --ml-* 变量映射到 dsh 的语义 token（--dsw-alias-*）。
- * dsh 在 body / body[data-ds-dark-theme] 上定义这些 token，明暗主题自动跟随。
- * 关闭时（无 .dsh-theme）回落到上方默认粉色变量。 */
+ *
+ * ── dsh 语义 token 的权威位置 ──────────────────────────────────────────
+ * 这些 --dsw-alias-* token 来自 dsh 的 `@deepseek-ai/dsh-client-ui-theme` 包
+ * （DeepSeek Harness 仓库 `packages/client/ui-theme/`，类型定义在
+ * `src/client/index.ts` 的 BUILTIN_INSPECT_TOKENS，样式在
+ * `src/styles/design-platform.css`）。
+ * 运行时的定义处：`<style data-plugin-css="@deepseek-ai/dsh-client-ui-theme/design-platform.css">`，
+ * 选择器为 `body`（明色）与 `body[data-ds-dark-theme]`（暗色），两组各自完整声明。
+ * 因此只要本插件根在 body 内，var(--dsw-alias-*) 会随 dsh 的明暗切换自动更新。
+ * 常用取值（明色）：bg-layer-1/2/3=#fff，bg-overlay=#e9ecf2（灰），
+ * label-primary=#0f1115，label-secondary=#61666b，label-tertiary=#81858c，
+ * state-business-primary=#4176e6（蓝），border-l1=#0000000a，border-l2=#0000001a。
+ *
+ * 映射要点（视觉约定）：
+ * - 标题/正文文字用 label-*（中性色），不要用 business-primary（蓝）当正文色。
+ * - 卡片背景用 bg-layer-*（正常表面），不要用 bg-overlay（那是浮层灰）。
+ * - 蓝色只保留给强调控件：选中态、开关、勾选框、focus 环、主按钮渐变。
+ * ────────────────────────────────────────────────────────────────────────
+ * 无 .dsh-theme 类时（用户手动选了「粉色」独立主题）使用上方粉色变量。 */
 .dsh-worldbook-root.dsh-theme {
   --ml-pink-0: var(--dsw-alias-bg-layer-2);
   --ml-pink-1: var(--dsw-alias-interactive-bg-hover-solid);
@@ -79,8 +97,8 @@
   --ml-pink-3: var(--dsw-alias-border-l2);
   --ml-pink-4: var(--dsw-alias-state-business-primary);
   --ml-pink-5: var(--dsw-alias-state-business-primary);
-  --ml-pink-6: var(--dsw-alias-state-business-primary);
-  --ml-pink-7: var(--dsw-static-deepseek-600);
+  --ml-pink-6: var(--dsw-alias-label-primary);
+  --ml-pink-7: var(--dsw-alias-label-primary);
   --ml-pink-8: var(--dsw-alias-state-business-tertiary);
   --ml-pink-9: var(--dsw-static-deepseek-800);
   --ml-cream: var(--dsw-alias-bg-layer-1);
@@ -90,10 +108,10 @@
   --ml-ink-3: var(--dsw-alias-label-tertiary);
   --ml-line: var(--dsw-alias-border-l2);
 
-  --ml-bg-card: var(--dsw-alias-bg-overlay);
+  --ml-bg-card: var(--dsw-alias-bg-layer-1);
   --ml-bg-card-solid: var(--dsw-alias-bg-layer-1);
   --ml-card-line: var(--dsw-alias-border-l1);
-  --ml-bg-surface: var(--dsw-alias-bg-layer-2);
+  --ml-bg-surface: var(--dsw-alias-bg-layer-1);
   --ml-bg-surface-hover: var(--dsw-alias-interactive-bg-hover-solid);
   --ml-bg-header: linear-gradient(90deg, var(--dsw-alias-bg-layer-1), var(--dsw-alias-bg-layer-2));
   --ml-bg-footer: var(--dsw-alias-bg-layer-2);

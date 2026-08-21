@@ -40,8 +40,8 @@ interface SlotsService {
 }
 
 // 统一包装：注入独立主题根容器，并按设置切换主题。
-// theme: 'pink'=独立粉色；'dsh'=跟随 dsh（加 .dsh-theme 类映射 dsh 变量）。
-// 初始值从同步缓存读取，避免首帧先粉色再切 dsh 的闪烁；服务端仍是权威，mount 后校正。
+// theme: 'dsh'=跟随 dsh（默认，加 .dsh-theme 类映射 dsh 变量）；'pink'=独立粉色主题。
+// 初始值从同步缓存读取（默认 dsh），避免首帧闪烁；服务端仍是权威，mount 后校正。
 function WithRoot({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<WorldbookTheme>(() => readThemeCache())
   useEffect(() => {

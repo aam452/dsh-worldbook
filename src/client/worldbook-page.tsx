@@ -252,7 +252,7 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
 function NewWorldbookModal(props: { onConfirm: (name: string) => Promise<void>; onClose: () => void }) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
-  return h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+  return h('div', { style: { position: 'fixed', inset: 0, background: 'var(--ml-mask)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
     h('div', { className: 'wb-card', style: { width: 'min(400px, 92vw)' } },
       h('div', { className: 'wb-card-hd' }, '新建世界书'),
       h('div', { className: 'wb-card-bd', style: { gap: 14 } },
@@ -669,7 +669,7 @@ function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange
     return () => window.removeEventListener('click', close)
   }, [stateOpen])
 
-  return h('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' } },
+  return h('div', { style: { position: 'fixed', inset: 0, background: 'var(--ml-mask)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' } },
     h('div', { className: 'wb-card', style: { width: 'min(860px, 96vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column' } },
       h('div', { className: 'wb-card-hd' },
         props.isNew ? '新增条目' : '编辑条目',

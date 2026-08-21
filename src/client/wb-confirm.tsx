@@ -52,8 +52,11 @@ export function ConfirmHost() {
 
   if (!state) return null
   const isConfirm = state.mode === 'confirm'
+  // 注意：这里不能加 .dsh-worldbook-root 类——该类的 CSS 规则会直接定义粉色默认
+  // --ml-* 变量，覆盖外层 WithRoot 上 .dsh-theme 的 dsh 映射，导致确认框永远粉色。
+  // 去掉根类后变量从父级继承，跟随 DSH / 粉色 都会正确生效。
   return h('div', {
-    className: 'dsh-worldbook-root',
+    className: 'dsh-worldbook-confirm',
     style: { position: 'fixed', inset: 0, zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ml-mask)' },
   },
     h('div', {

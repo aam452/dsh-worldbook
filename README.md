@@ -50,10 +50,34 @@ dsh plugin --profile web update dsh-worldbook
 
 - 卸载插件
 
-```
+```bash
+dsh plugin --profile web remove dsh-worldbook
 ```
 
-### 方式二：npx安装
+### 方式二：脚本安装
+
+本地开发时用，`link:` 会指向本地项目目录，改代码 `npm run build` 后实时生效，无需提交/发布即可验证。
+
+**命令行方式：**
+
+```bash
+git clone https://github.com/aam452/dsh-worldbook
+cd dsh-worldbook
+powershell -ExecutionPolicy Bypass -File .\link-install.ps1 web -Method 1
+```
+
+**双击脚本方式：**
+
+1. 下载项目到本地，进入 `dsh-worldbook` 目录。
+2. 双击 `link-install.ps1`（Windows 会提示选择打开方式，选 PowerShell）。
+3. 按提示输入即可；
+
+>可选软连接安装：非常适合二次开发的安装方式
+
+
+
+### 方式三：npx安装
+
 也可以不依赖全局安装，用 `npx` 拉取最新版 CLI：
 
 ```bash
@@ -61,23 +85,7 @@ npx -p @deepseek-ai/dsh@latest dsh plugin --profile web add github:aam452/dsh-wo
 npx -p @deepseek-ai/dsh@latest dsh --profile web
 ```
 
-### 方式二：从源码安装（开发 / 二次开发用）
 
-```bash
-# 1. 克隆并构建
-git clone https://github.com/aam452/dsh-worldbook
-cd dsh-worldbook     # 换成本地已下载的真实的dsh-worldbook地址
-npm install
-npm run build        # 产物 lib/：host 半 tsc + client 半 esbuild
-
-# 2. 装进 dsh profile（在插件仓库根目录执行；`.` 会被解析为对本地源码的 link 依赖）
-dsh plugin --profile web add .
-
-# 3. 启动
-dsh --profile web
-```
-
-改动源码后，重新执行 `npm run build`，再跑一次 `dsh plugin --profile web add .` 即可让 profile 引用最新的本地构建。
 
 ---
 

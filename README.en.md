@@ -41,14 +41,6 @@ If the `dsh` CLI is installed globally, run:
 
 ```bash
 dsh plugin --profile web add github:aam452/dsh-worldbook
-dsh --profile web
-```
-
-You can also pull the latest CLI without a global install, using `npx`:
-
-```bash
-npx -p @deepseek-ai/dsh@latest dsh plugin --profile web add github:aam452/dsh-worldbook
-npx -p @deepseek-ai/dsh@latest dsh --profile web
 ```
 
 - To update the plugin:
@@ -57,23 +49,43 @@ npx -p @deepseek-ai/dsh@latest dsh --profile web
 dsh plugin --profile web update dsh-worldbook
 ```
 
-### Method 2: Install from source (for development / secondary development)
+- To uninstall the plugin:
 
 ```bash
-# 1. Clone and build
-git clone https://github.com/aam452/dsh-worldbook
-cd dsh-worldbook     # replace with the actual local path of your dsh-worldbook checkout
-npm install
-npm run build        # output in lib/: host half via tsc + client half via esbuild
-
-# 2. Install into a dsh profile (run in the plugin repo root; `.` resolves to a link dependency on the local source)
-dsh plugin --profile web add .
-
-# 3. Start
-dsh --profile web
+dsh plugin --profile web remove dsh-worldbook
 ```
 
-After modifying the source, run `npm run build` again, then re-run `dsh plugin --profile web add .` to make the profile reference the latest local build.
+### Method 2: Script install (via `link:` for local development)
+
+Recommended for local development. `link:` points to the local project directory, so changes take effect immediately after `npm run build` — no commit/publish needed to verify.
+
+**Via the command line:**
+
+```bash
+git clone https://github.com/aam452/dsh-worldbook
+cd dsh-worldbook
+powershell -ExecutionPolicy Bypass -File .\link-install.ps1 web -Method 1
+```
+
+**Via double-clicking the script:**
+
+1. Download the project and open the `dsh-worldbook` directory.
+2. Double-click `link-install.ps1` (Windows will ask how to open it — choose PowerShell).
+3. Follow the prompt (soft-link install); if the plugin is already installed, the script will tell you to uninstall first.
+
+> Notes:
+> - The script first runs `npm run build` to produce the latest `lib/`, then uses `dsh plugin --profile web add link:G:/projects/dsh-worldbook` to create the soft link.
+> - In non-interactive terminals (e.g. CI/scripts) you must explicitly pass `-Method 1|2|3`, otherwise the script aborts with an error: `1`=soft-link install, `2`=GitHub install, `3`=update plugin.
+> - After changing code, just `npm run build` and restart dsh for changes to take effect; to publish, push to GitHub and run `dsh plugin --profile web update dsh-worldbook`.
+
+### Method 3: Install via npx
+
+Without a global install, use `npx` to pull the latest CLI:
+
+```bash
+npx -p @deepseek-ai/dsh@latest dsh plugin --profile web add github:aam452/dsh-worldbook
+npx -p @deepseek-ai/dsh@latest dsh --profile web
+```
 
 ---
 

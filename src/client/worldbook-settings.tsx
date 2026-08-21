@@ -454,9 +454,6 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
       ),
       h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0 } },
         renderBody(),
-        h('div', { className: 'wb-actions', style: { marginTop: 16 } },
-          h('button', { className: 'wb-btn', onClick: () => onClose?.() }, '关闭'),
-        ),
       ),
     ),
   )
