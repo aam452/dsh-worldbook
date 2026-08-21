@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as worldbook from '../data/worldbook.js'
 import * as setting from '../data/setting.js'
 import { lastCompatReport } from '../compat.js'
+import { syncDevTool } from '../tools/index.js'
 
 const PREFIX = '/api/worldbook'
 
@@ -21,7 +22,7 @@ export function registerRest(ctx: Context): void {
             res.end('forbidden')
             return
           }
-          route(req, res).catch((err) => {
+          route(ctx, req, res).catch((err) => {
             const message = err instanceof Error ? err.message : String(err)
             console.error('[dsh-worldbook-rest]', message)
             json(res, 200, { success: false, message })
@@ -33,7 +34,7 @@ export function registerRest(ctx: Context): void {
 }
 
 // ── 路由分派 ─────────────────────────────────────────────────────────────
-async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
   const seg = pathname.slice(PREFIX.length).split('/').filter(Boolean)
   const method = (req.method ?? 'GET').toUpperCase()
@@ -204,6 +205,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
         else if (key === 'devEntryIds') setting.setDevEntryIds(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') : [])
         else if (key === 'devPerms') setting.setDevPerms(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') as setting.DevPerm[] : [])
       }
+      // 开发模式开关变化时同步工具注册（开则暴露 schema，关则注销）
+      syncDevTool(ctx)
       return ok(res, settingAll())
     }
   }

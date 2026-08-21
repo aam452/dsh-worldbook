@@ -106,55 +106,54 @@ function pick<T extends Record<string, unknown>>(args: T, keys: string[]): Recor
   return out
 }
 
-export function apply(ctx: Context): void {
-  const tools = ctx.get('tools')
-  if (tools === undefined) return
+let disposeTool: (() => void) | null = null
 
-  tools.register(defineTool({
-    name: 'worldbook_edit',
-    description:
-      '世界书（World Info）编辑工具：管理世界书与条目。开发模式专用，仅当插件设置开启「开发世界书模式」时可用。' +
-      '提供 worldbook/list_books、list_entries、create_book、create_entry、update_entry、delete_entry、export_book 七类操作。' +
-      '返回 JSON，字段对齐 SillyTavern World Info 格式。',
-    parameters: {
-      action: {
-        type: 'string',
-        required: true,
-        enum: ['list_books', 'list_entries', 'create_book', 'create_entry', 'update_entry', 'delete_entry', 'export_book'],
-        description: 'list_books=列出全部世界书；list_entries=列出某世界书条目；create_book=新建世界书；create_entry=在某世界书下新增条目；update_entry=更新条目；delete_entry=删除条目；export_book=导出世界书为 ST JSON。',
-      },
-      bookId: { type: 'string', description: '世界书 id（list_books 返回）' },
-      entryId: { type: 'string', description: '条目 id（list_entries 返回）' },
-      name: { type: 'string', description: '世界书名称（create_book 用）' },
-      description: { type: 'string', description: '世界书描述' },
-      entry: {
-        type: 'object',
-        additionalProperties: false,
-        properties: ENTRY_FIELDS,
-        description: '条目字段（create_entry/update_entry 用）。',
-      },
+// 工具定义：开发模式专用，仅当设置开启时注册（关闭时不暴露 schema 给模型）。
+const worldbookTool = defineTool({
+  name: 'worldbook_edit',
+  description:
+    '世界书（World Info）编辑工具：管理世界书与条目。开发模式专用，仅当插件设置开启「开发世界书模式」时可用。' +
+    '提供 worldbook/list_books、list_entries、create_book、create_entry、update_entry、delete_entry、export_book 七类操作。' +
+    '返回 JSON，字段对齐 SillyTavern World Info 格式。',
+  parameters: {
+    action: {
+      type: 'string',
+      required: true,
+      enum: ['list_books', 'list_entries', 'create_book', 'create_entry', 'update_entry', 'delete_entry', 'export_book'],
+      description: 'list_books=列出全部世界书；list_entries=列出某世界书条目；create_book=新建世界书；create_entry=在某世界书下新增条目；update_entry=更新条目；delete_entry=删除条目；export_book=导出世界书为 ST JSON。',
     },
-    output: {
-      schema: { type: 'object', additionalProperties: true },
-      render: text,
+    bookId: { type: 'string', description: '世界书 id（list_books 返回）' },
+    entryId: { type: 'string', description: '条目 id（list_entries 返回）' },
+    name: { type: 'string', description: '世界书名称（create_book 用）' },
+    description: { type: 'string', description: '世界书描述' },
+    entry: {
+      type: 'object',
+      additionalProperties: false,
+      properties: ENTRY_FIELDS,
+      description: '条目字段（create_entry/update_entry 用）。',
     },
-    async execute(args: Record<string, unknown>) {
-      const guard = devGuard()
-      if (guard) return guard
-      const scope = scopeGuard(args)
-      if (scope) return scope
-      const action = String(args.action ?? '')
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: true },
+    render: text,
+  },
+  async execute(args: Record<string, unknown>) {
+    const guard = devGuard()
+    if (guard) return guard
+    const scope = scopeGuard(args)
+    if (scope) return scope
+    const action = String(args.action ?? '')
 
-      if (action === 'list_books') {
-        return j({ books: worldbook.list().map(worldbook.toBookView) })
-      }
+    if (action === 'list_books') {
+      return j({ books: worldbook.list().map(worldbook.toBookView) })
+    }
 
-      if (action === 'list_entries') {
-        if (typeof args.bookId !== 'string') throw new Error('action=list_entries 需要 bookId')
-        return j({ entries: worldbook.entries(args.bookId).map((r) => worldbook.toEntryView(r)) })
-      }
+    if (action === 'list_entries') {
+      if (typeof args.bookId !== 'string') throw new Error('action=list_entries 需要 bookId')
+      return j({ entries: worldbook.entries(args.bookId).map((r) => worldbook.toEntryView(r)) })
+    }
 
-      if (action === 'create_book') {
+    if (action === 'create_book') {
         const name = typeof args.name === 'string' && args.name.trim() !== '' ? args.name.trim() : '未命名世界书'
         const row = worldbook.create(name, { description: typeof args.description === 'string' ? args.description : undefined })
         const entry = args.entry as Record<string, unknown> | undefined
@@ -199,5 +198,19 @@ export function apply(ctx: Context): void {
 
       throw new Error('未知 action: ' + action)
     },
-  }))
+})
+export function syncDevTool(ctx: Context): void {
+  const tools = ctx.get('tools')
+  if (tools === undefined) return
+  const should = setting.devMode()
+  if (should && disposeTool === null) {
+    disposeTool = tools.register(worldbookTool)
+  } else if (!should && disposeTool !== null) {
+    disposeTool()
+    disposeTool = null
+  }
+}
+
+export function apply(ctx: Context): void {
+  syncDevTool(ctx)
 }
