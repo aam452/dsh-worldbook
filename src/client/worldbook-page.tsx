@@ -323,17 +323,22 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
         if (!json.success) throw new Error(json.message || '导入失败')
         onSelect(existing.id)
       } else {
-        // 无同名 → 新建一本世界书并写入条目
+        // 无同名 → 新建一本世界书并写入条目；导入失败时回滚删除刚建的空世界书
         const name = fileName
         const created = await api<StWorldBook>('/worldbooks', { method: 'POST', body: JSON.stringify({ name }) })
-        const res = await fetch(`/api/worldbook/worldbooks/${created.id}/import`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ json: JSON.stringify(parsed) }),
-        })
-        const json = await res.json()
-        if (!json.success) throw new Error(json.message || '导入失败')
-        onSelect(created.id)
+        try {
+          const res = await fetch(`/api/worldbook/worldbooks/${created.id}/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ json: JSON.stringify(parsed) }),
+          })
+          const json = await res.json()
+          if (!json.success) throw new Error(json.message || '导入失败')
+          onSelect(created.id)
+        } catch (err) {
+          try { await api(`/worldbooks/${created.id}`, { method: 'DELETE' }) } catch { /* 回滚失败不阻塞报错 */ }
+          throw err
+        }
       }
       onDone()
     } catch (err) {
