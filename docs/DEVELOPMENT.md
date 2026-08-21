@@ -30,7 +30,7 @@ dsh-worldbook 是标准 DSH 双半插件，数据走 host 半，UI 走 client �
 
 **依赖注入**：
 - Host 半：`inject: ['webServer']`（REST 挂载）
-- Client 半：`inject: ['slots']`（UI 槽位注册）
+- Client 半：`inject: ['slots', 'workspaces', 'locale']`（UI 槽位注册 / 工作区作用域 / 界面文案翻译）
 
 ## 二、构建与测试
 
@@ -60,13 +60,30 @@ npm run test:worldbook  # 核心逻辑冒烟测试（先 build:host）
 ### 3.2 常用 API
 
 - **世界书本**：`list()` / `listEnabled()` / `get(id)` / `create(name, opts)` / `update(id, patch)` / `setEnabled(id, bool)` / `remove(id)`
-- **条目**：`entries(bookId)` / `getEntry(bookId, entryId)` / `addEntry(bookId, patch)` / `updateEntry(bookId, entryId, patch)` / `removeEntry(bookId, entryId)` / `reorderEntries(bookId, orderedIds)`（重写 `display_index`）
+- **条目**：`entries(bookId)` / `getEntry(bookId, entryId)` / `addEntry(bookId, patch)` / `updateEntry(bookId, entryId, patch)` / `removeEntry(bookId, entryId)` / `reorderEntries(bookId, orderedIds)`（重写 `displayIndex`）
 - **ST 导入导出**：`parseStWorldJson(json)` → `{ name, scanDepth, entries }`；`toStWorldJson(bookId)` → ST 兼容 JSON（含 `extensions.display_index`）
-- **归一化**：`normalizeEntry(src)` 把前端/ST 字段规范化为 `NormalizedEntry`（驼峰字段名）；`toEntryView(row)` 读库行 → 视图对象
+- **归一化**：`normalizeEntry(src)` 把前端/ST 字段规范化为 `NormalizedEntry`（字段名即 ST 名称）；`toEntryView(row)` 读库行 → 视图对象
 
-### 3.3 新增一个条目字段
+### 3.3 字段命名约定（ST 唯一命名规范）
 
-1. `schema.sql` 加列（或用 `db/index.ts` 的 `migrate` 里 `addCol` 补老库）。
+全链路（DB 列 / View / REST / 工具 schema / 客户端 UI / ST JSON）统一使用 SillyTavern 编辑器内部字段名，**无映射层**：
+
+| 字段 | 说明 |
+| --- | --- |
+| `key` / `keysecondary` | 主/副触发关键词（数组） |
+| `order` | 注入优先级（SQL 保留字，SQL 中写 `"order"`） |
+| `disable` | 是否禁用（ST 语义，`true`=禁用） |
+| `selectiveLogic` | 选择性逻辑 0-3 |
+| `caseSensitive` / `matchWholeWords` | 三态（null=用全局） |
+| `scanDepth` / `excludeRecursion` / `preventRecursion` / `useProbability` | 扫描/递归/概率 |
+| `displayIndex` | 自定义排序序数（导出到 `extensions.display_index`） |
+| `probability` / `depth` / `sticky` / `cooldown` / `delay` / `position` | 基础语义 |
+
+`enabled` 仅用于世界书本级（`worldbooks.enabled`，插件自身概念，非 ST 条目字段）；条目禁用一律用 `disable`。
+
+### 3.4 新增一个条目字段
+
+1. `schema.sql` 加列（或用 `db/index.ts` 的 `migrate` 里 `addCol`/`renameCol` 补老库）。
 2. `WorldbookEntryRow`（接口）+ `normalizeEntry`（读写映射）+ `toEntryView`（输出视图）三处同步。
 3. 若需跨轮状态，参照 `worldbook_timed_effects` 模式加表 + `getTimedEffects/setTimedEffect/pruneTimedEffects/clearTimedEffects`。
 
@@ -90,7 +107,7 @@ renderWorldbookInjection(
 
 | 特性 | 说明 |
 | --- | --- |
-| 关键词触发 | 主键 keys + 副键 keysecondary，支持大小写/整词/正则 |
+| 关键词触发 | 主键 key + 副键 keysecondary，支持大小写/整词/正则 |
 | 选择性 | selectiveLogic 1=NOT_ALL / 2=NOT_ANY / 3=AND_ALL |
 | 深度 | scanDepth 扫描最近 N 条消息（<=0 全扫） |
 | 递归 | 命中 content 入 buffer → 递归轮扫描；MAX_RECURSION=5 |
@@ -102,7 +119,10 @@ renderWorldbookInjection(
 | delay | cursor < delay 时强制注入 |
 | 概率 | useProbability + probability 百分比 |
 | 组互斥 | 同组按 order 胜出 |
-| 排序 | 注入按 order 降序；展示用 display_index |
+| 排序 | 注入按 order 降序；展示用 displayIndex |
+| 角色卡绑定 | 条目 `characterFilter` 按「当前角色」过滤（兼容层，见 4.4） |
+
+
 
 ### 4.3 自定义注入场景
 
@@ -115,8 +135,9 @@ import { openDb } from 'dsh-worldbook/db'
 openDb(dataDir)  // 初始化（也可交给插件 apply 统一初始化）
 
 // 在任意时机：
-const world = renderWorldbookInjection(textLines, { cursor })
+const world = renderWorldbookInjection(textLines, { cursor, character })
 // world: InjectedWorldEntry[]，取 .content 拼装进你的请求
+// character?: { name, tags } 可选——传入时按条目 characterFilter 过滤（见 4.4）
 ```
 
 ## 五、REST API
@@ -142,7 +163,7 @@ const world = renderWorldbookInjection(textLines, { cursor })
 | POST | `/worldbooks/:id/entries` | 新增 `{ entry? }` |
 | PUT | `/worldbooks/:id/entries/:eid` | 更新（整条字段） |
 | DELETE | `/worldbooks/:id/entries/:eid` | 删除 |
-| PUT | `/worldbooks/:id/entries/reorder` | `{ orderedIds }` 重写 display_index |
+| PUT | `/worldbooks/:id/entries/reorder` | `{ orderedIds }` 重写 displayIndex |
 
 ### 设置
 
@@ -151,7 +172,7 @@ const world = renderWorldbookInjection(textLines, { cursor })
 | GET | `/settings` | `{ enabled, workspaceMode, workspaceIds, theme, injectMode, devMode, devAction, devBookId, devEntryIds, devPerms }` |
 | PUT | `/settings` | 更新 `{ enabled?\|workspaceMode?\|workspaceIds?\|theme?\|injectMode?\|devMode?\|devAction?\|devBookId?\|devEntryIds?\|devPerms? }` |
 
-## 六、槽位契约（集成指南）
+## 六、槽位契约（ui内嵌指南）
 
 本插件提供**两处可集成的 UI**：世界书管理页与插件设置卡片。管理页由 `nav` 一个槽承载，宿主自行决定挂到悬浮窗还是设置页；设置卡片是独立一个槽。
 
@@ -166,6 +187,8 @@ const world = renderWorldbookInjection(textLines, { cursor })
 
 所有自定义槽由本插件在 `shell.overlay`（list/root，additive）注册时通过 `children` 声明，**常驻不注销**——保证它们不随 `settings.section` 的动态注销而塌缩。`shell.overlay` 的 SlotMap 类型由官方 `dsh-client-ui-layout` 声明；本地类型检查时若未安装该包，需在 `src/client/slots.ts` 里按运行时 slot-catalog（list/root）补全声明（见该文件内注释）。
 
+**界面文案与 locale**：自定义槽的 `label`（dsh 设置侧边栏「世界书」分区标题）通过 `ctx.locale` 读取，随 dsh 语言切换动态更新（中文「世界书」/ 英文「World Book」）。词典注册在 `src/client/client.ts` 的 `ctx.effect(() => ctx.locale.register(...))`，命名空间 `dsh.worldbook`（key 声明见 `src/client/slots.ts` 的 `LocaleNamespaceMap`）。若 `dsh-client-locale` 未安装到本地 node_modules，其类型由 `slots.ts` 补全声明，仅用于本地类型检查，运行时仍由 dsh 提供。
+
 ### 6.2 宿主在线握手（重要）
 
 `settings.section` 按需注册：
@@ -178,13 +201,14 @@ const world = renderWorldbookInjection(textLines, { cursor })
 
 对接分四步，全部走 dsh 的 `slots` 服务：
 
-1. **订阅槽**：监听 `mindlink.worldbook.nav` 与 `mindlink.worldbook.settings-card` 是否有注册条目，本插件加载/卸载时同步。
-2. **读取组件**：从对应槽的条目里取出组件引用；没有条目说明世界书插件未安装或未加载。
-3. **渲染**：用 React 把组件渲染到你的位置；同时注册 `worldbook.host.present` 完成握手。
-4. **卸载**：组件卸载时，注销订阅返回的 disposer 与握手注册返回的 disposer。
+1. **订阅槽**：监听 `mindlink.worldbook.nav` 与 `mindlink.worldbook.settings-card` 是否有注册条目，本插件加载/卸载时同步（用 `slots.subscribe(key, sync)`，并在 `ctx.effect` 内注销）。
+2. **读取组件**：从对应槽的条目里取出 `component` 引用；没有条目说明世界书插件未安装或未加载。
+3. **渲染**：用 React 把组件渲染到你的位置；同时注册 `worldbook.host.present`（`slots.register({ name: 'worldbook.host.present', priority: 0 }, () => null)`）完成握手。
+4. **卸载**：组件卸载时，注销订阅返回的 disposer 与握手注册返回的 disposer（放在同一个 `ctx.effect` 里随 fiber 清理）。
 
 要点：
 - 管理页由 `nav` 一个槽承载，**只挂载一个位置**（悬浮窗或设置页任选）；设置卡片（`settings-card`）单独挂载到设置页。
+- 本插件对 `shell.overlay`、`nav`、`settings-card` 的注册均用 `slots.inject(key, () => slots.register(...))` 包裹——先等目标槽声明建立再注册，声明折叠时级联清理；对接方若也向 `shell.overlay` 注册，建议同样用 `inject` 包裹。
 - 未读到条目时可按需回退到你自己的兜底界面。
 - 若宿主不需要本插件 UI，可只用 REST API 或 `renderWorldbookInjection`（见第三/四/五章），完全脱离槽位。
 
@@ -205,11 +229,49 @@ const world = renderWorldbookInjection(textLines, { cursor })
   - **成因**：契约页根容器 `.dsh-worldbook-root` 由 `WithRoot` 渲染，带 `height: 100%` 内联样式，默认按「填满宿主给定高度、内部自滚动」设计。放入外部滚动容器后，`height: 100%` 把世界书内容限死在可视高度内，内容一旦超高就溢出，压穿宿主滚动容器的 `padding-bottom`，导致**滚动到底时最后条目被固定底栏遮挡**。
   - **规避**：让契约页根容器高度自适应（覆盖为 `height: auto`），由宿主滚动容器统一滚动，并用宿主滚动容器的**底部 padding** 为固定底栏预留空间。世界书页内 `max-height + overflow` 的卡片内滚动不受影响，仍正常工作。
 
-## 七、主题开发
+
+
+## 七 角色卡绑定（st移植重点内容）
+
+本插件**没有角色卡**。为兼容其它 DSH ST 插件（带角色卡的），实现 ST 的 `characterFilter`
+逻辑：条目可声明 `characterFilter: { isExclude, names, tags }`，注入时按「当前角色」过滤
+（对齐 ST world-info.js 4704-4731，names 比对角色文件名、tags 比对标签 id）。
+
+> **设计定位（重点）**：对移植 ST 的插件来说，UI 槽位契约（第六节）接入与否无所谓，
+> **角色卡绑定是硬性兼容点**——世界书绑不上角色卡，对 ST 移植插件就是废的。
+>
+> 
+>
+> 该约定是我们这边单方面定的：本插件没有角色卡，无法预知目标插件如何暴露当前角色，
+> 所以先定下一个稳定的读取协议，让移植方来适配。若目标插件已有自己的角色上下文
+> 网关，应在宿主层写适配器转成此协议，而不是反过来要求本插件去读对方的私有接口。
+
+**其它插件如何接入**：注册 `worldbook.characterContext` 服务，提供
+`getCurrentCharacter(sessionId) → { name, tags }`（`name`=角色文件名不含扩展名，
+`tags`=标签 id 数组）。示例：
+
+```ts
+ctx.provide('worldbook.characterContext', {
+  getCurrentCharacter(sessionId) {
+    // 从你的角色卡数据里查当前会话角色
+    return { name: 'alice', tags: ['warrior'] }
+  },
+})
+```
+
+- 无提供方 / 拿不到角色 → 不做角色过滤（本插件自身无角色，默认全部注入）。
+- 角色卡 JSON 导入：`pickCharacterBook` 自动抽取 CCv2/CCv3 的 `character_book`，
+  条目里的 `characterFilter` 随 `raw` 原样保留、导出还原。
+- 注入引擎签名对外暴露 `renderWorldbookInjection(textLines, { cursor, character })`，
+  不想走服务注册的宿主也可直接传 `character` 完成过滤（见 4.5）。
+
+
+
+## 八、主题开发
 
 本插件的 UI 主题有两态：**跟随 DSH**（默认）与**粉色独立主题**（可选）。主题相关代码全部在 client 半：`src/client/theme.css`、`src/client/wb-theme.ts`、`src/client/client.ts`（`WithRoot`）。
 
-### 7.1 主题机制
+### 8.1 主题机制
 
 - **默认是「跟随 DSH」**：插件设置 `theme: 'dsh'`，UI 根容器加 `.dsh-theme` 类。
 - **粉色是可选独立主题**（`theme: 'pink'`）：根容器**不加** `.dsh-theme` 类，使用 theme.css 里 `.dsh-worldbook-root` 上定义的粉色变量。
@@ -217,7 +279,7 @@ const world = renderWorldbookInjection(textLines, { cursor })
   - 跟随 DSH 时，颜色随 dsh 明暗自动切换；
   - 粉色时，颜色用 theme.css 顶部的粉色变量。
 
-### 7.2 dsh 统一颜色 token 的权威位置
+### 8.2 dsh 统一颜色 token 的权威位置
 
 `--dsw-alias-*` 语义 token（Semantic Token）来自 dsh 的 **`@deepseek-ai/dsh-client-ui-theme`** 包，在 DeepSeek Harness 仓库 **`packages/client/ui-theme/`**：
 
@@ -229,7 +291,7 @@ const world = renderWorldbookInjection(textLines, { cursor })
 
 常用取值（明色）：`bg-layer-1/2/3`=#fff、`bg-overlay`=#e9ecf2（灰）、`label-primary`=#0f1115、`label-secondary`=#61666b、`label-tertiary`=#81858c、`state-business-primary`=#4176e6（蓝）、`border-l1`=#0000000a、`border-l2`=#0000001a。
 
-### 7.3 token 的两层与精细度
+### 8.3 token 的两层与精细度
 
 dsh 的 token 分两层，**写主题时要知道用哪层**：
 
@@ -243,19 +305,19 @@ dsh 的 token 分两层，**写主题时要知道用哪层**：
 - 需要"同色系深浅渐变"（hover 深、正文中、边框浅）时用**色板层**，但要在暗色下**自行补一套覆盖**——dsh 自己也是"明暗两套值"这么做的。
 - **不要**把语义层 token 当正文色用（例如把 `state-business-primary`（蓝）映射给标题文字），那是视觉事故（蓝字）的根源。
 
-### 7.4 映射要点（视觉约定）
+### 8.4 映射要点（视觉约定）
 
 - 标题/正文文字用 `label-*`（中性色），**不要**用 `state-business-primary`（蓝）当正文色。
 - 卡片背景用 `bg-layer-*`（正常表面），**不要**用 `bg-overlay`（那是浮层灰）。
 - 蓝色只保留给强调控件：选中态、开关、勾选框、focus 环、主按钮渐变。
 - 模态遮罩用 `var(--ml-mask)`，不要硬编码 `rgba(0,0,0,.4)` 之类。
 
-### 7.5 常见坑
+### 8.5 常见坑
 
 - **不要给子容器重复加 `.dsh-worldbook-root` 类**：该类规则会在该元素上直接声明粉色变量，覆盖外层 `.dsh-theme` 的映射，导致该元素永远粉色（ConfirmHost 曾踩过：确认框套了自己的 `.dsh-worldbook-root` 根类，结果粉色无法跟随 DSH）。子容器应去掉根类，让变量从父级继承。
 - **新增 UI 元素一律走 `--ml-*` 变量**，不要在 tsx 里写死 `#hex` / `rgba`。
 - 修改映射前，先到 7.2 的运行时 `<style>` 里核对 token 是否存在、明暗取值，避免 `var()` 失效回落到默认。
 
-## 八、开源与协议
+## 九、开源与协议
 
 MIT。开发文档、测试、代码均公开。集成与二次开发均欢迎。

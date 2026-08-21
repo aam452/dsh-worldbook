@@ -2,14 +2,15 @@ import { getDb, now, uuid } from '../db/index.js'
 import { parseJson, toJson } from './base.js'
 
 // 世界书：全局共享数据（不绑定角色卡/会话），作用域随插件「启用 + 工作区生效范围」。
-// 字段对齐 SillyTavern World Info（spec v2 + 编辑器内部格式），ST JSON 双向兼容。
+// 字段名全程对齐 SillyTavern World Info 编辑器内部格式（newWorldInfoEntryDefinition），
+// 无映射层：DB 列名 / View / REST / 工具 schema / 客户端 UI / ST JSON 统一用 ST 字段名。
 //   - 顶层(spec v2)：name / description / scan_depth / extensions
-//   - 条目：keys/content/comment/constant/vectorized/selective/selectiveLogic(0~3)/
-//           insertion_order/position(0~7)/enabled/priority/caseSensitive/matchWholeWords/
-//           scanDepth/useGroupScoring/excludeRecursion/preventRecursion/
-//           delayUntilRecursion/probability/useProbability/depth/outletName/group/
-//           groupOverride/groupWeight/sticky/cooldown/delay/automationId/role/triggers/
-//           characterFilter 等；ST 高级字段并入 raw 保留、导出还原。
+//   - 条目：key/keysecondary/content/comment/constant/vectorized/selective/selectiveLogic(0~3)/
+//           order/position(0~7)/disable/caseSensitive/matchWholeWords/scanDepth/
+//           useGroupScoring/excludeRecursion/preventRecursion/delayUntilRecursion/
+//           probability/useProbability/depth/outletName/group/groupOverride/groupWeight/
+//           sticky/cooldown/delay/automationId/role/triggers/characterFilter 等；
+//           ST 高级字段并入 raw 保留、导出还原。order 为 SQL 保留字，SQL 中统一双引号 "order"。
 
 export interface WorldbookRow {
   id: string
@@ -25,37 +26,36 @@ export interface WorldbookRow {
 export interface WorldbookEntryRow {
   id: string
   worldbook_id: string
-  keys: string
-  secondary_keys: string
+  key: string
+  keysecondary: string
   comment: string | null
   content: string
   constant: number
   vectorized: number
   selective: number
-  selective_logic: number
-  insertion_order: number
+  selectiveLogic: number
+  order: number
   position: number
-  enabled: number
-  priority: number | null
-  case_sensitive: number | null
-  match_whole_words: number | null
-  scan_depth: number | null
-  exclude_recursion: number
-  prevent_recursion: number
-  use_probability: number | null
+  disable: number
+  caseSensitive: number | null
+  matchWholeWords: number | null
+  scanDepth: number | null
+  excludeRecursion: number
+  preventRecursion: number
+  useProbability: number | null
   probability: number
   depth: number
   sticky: number | null
   cooldown: number | null
   delay: number | null
-  display_index: number
+  displayIndex: number
   raw: string | null
 }
 
 // ── 规范化条目视图（注入引擎与 UI 共用，字段对齐 ST 面板） ──
 export interface WorldbookEntryView {
   id: string
-  keys: string[]
+  key: string[]
   keysecondary: string[]
   comment: string | null
   content: string
@@ -63,10 +63,9 @@ export interface WorldbookEntryView {
   vectorized: boolean
   selective: boolean
   selectiveLogic: 0 | 1 | 2 | 3
-  insertionOrder: number
+  order: number
   position: number
-  enabled: boolean
-  priority: number | null
+  disable: boolean
   caseSensitive: boolean | null
   matchWholeWords: boolean | null
   scanDepth: number | null
@@ -100,8 +99,8 @@ export interface WorldbookEntryView {
 export function toEntryView(row: WorldbookEntryRow): WorldbookEntryView {
   const raw = parseJson<Record<string, unknown> | null>(row.raw, null)
   const rawMap = raw ?? {}
-  const keys = parseJson<string[]>(row.keys, [])
-  const secondary = parseJson<string[]>(row.secondary_keys, [])
+  const key = parseJson<string[]>(row.key, [])
+  const secondary = parseJson<string[]>(row.keysecondary, [])
   const triggers = Array.isArray(rawMap.triggers) ? rawMap.triggers.filter((x): x is string => typeof x === 'string') : []
   const cf = (rawMap.characterFilter ?? {}) as Record<string, unknown>
   const names = Array.isArray(cf.names) ? cf.names.filter((x): x is string => typeof x === 'string') : []
@@ -112,27 +111,26 @@ export function toEntryView(row: WorldbookEntryRow): WorldbookEntryView {
         : false
   const view: WorldbookEntryView = {
     id: row.id,
-    keys: Array.isArray(keys) ? keys : [],
+    key: Array.isArray(key) ? key : [],
     keysecondary: Array.isArray(secondary) ? secondary : [],
     comment: row.comment,
     content: row.content ?? '',
     constant: row.constant === 1,
     vectorized: row.vectorized === 1,
     selective: row.selective === 1,
-    selectiveLogic: (row.selective_logic as 0 | 1 | 2 | 3) ?? 0,
-    insertionOrder: row.insertion_order,
+    selectiveLogic: (row.selectiveLogic as 0 | 1 | 2 | 3) ?? 0,
+    order: row.order,
     position: row.position,
-    enabled: row.enabled === 1,
-    priority: row.priority,
-    caseSensitive: row.case_sensitive === null ? null : row.case_sensitive === 1,
-    matchWholeWords: row.match_whole_words === null ? null : row.match_whole_words === 1,
-    scanDepth: row.scan_depth,
+    disable: row.disable === 1,
+    caseSensitive: row.caseSensitive === null ? null : row.caseSensitive === 1,
+    matchWholeWords: row.matchWholeWords === null ? null : row.matchWholeWords === 1,
+    scanDepth: row.scanDepth,
     useGroupScoring: typeof raw?.useGroupScoring === 'boolean' ? (raw.useGroupScoring as boolean) : null,
-    excludeRecursion: row.exclude_recursion === 1,
-    preventRecursion: row.prevent_recursion === 1,
+    excludeRecursion: row.excludeRecursion === 1,
+    preventRecursion: row.preventRecursion === 1,
     delayUntilRecursion: delayUntil,
     probability: row.probability,
-    useProbability: row.use_probability === null ? true : row.use_probability === 1,
+    useProbability: row.useProbability === null ? true : row.useProbability === 1,
     depth: row.depth,
     outletName: typeof raw?.outletName === 'string' ? raw.outletName : '',
     group: typeof raw?.group === 'string' ? raw.group : '',
@@ -141,7 +139,7 @@ export function toEntryView(row: WorldbookEntryRow): WorldbookEntryView {
     sticky: row.sticky,
     cooldown: row.cooldown,
     delay: row.delay,
-    displayIndex: row.display_index,
+    displayIndex: row.displayIndex,
     automationId: typeof raw?.automationId === 'string' ? raw.automationId : '',
     role: typeof raw?.role === 'number' ? raw.role : null,
     triggers,
@@ -220,7 +218,7 @@ export function remove(id: string): void {
 // ── 条目 ──
 export function entries(bookId: string): WorldbookEntryRow[] {
   return getDb()
-    .prepare('SELECT * FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0 ORDER BY display_index ASC, insertion_order DESC')
+    .prepare('SELECT * FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0 ORDER BY displayIndex ASC, "order" DESC')
     .all(bookId) as unknown as WorldbookEntryRow[]
 }
 
@@ -230,17 +228,17 @@ export function replaceEntries(bookId: string, items: Array<Record<string, unkno
   const t = now()
   db.prepare('UPDATE worldbook_entries SET is_deleted=1, deleted_at=?, updated_at=? WHERE worldbook_id=?').run(t, t, bookId)
   const insert = db.prepare(
-    `INSERT INTO worldbook_entries (id, worldbook_id, keys, secondary_keys, comment, content, constant, vectorized, selective, selective_logic, insertion_order, position, enabled, priority, case_sensitive, match_whole_words, scan_depth, exclude_recursion, prevent_recursion, use_probability, probability, depth, sticky, cooldown, delay, display_index, raw, created_at, updated_at, created_by, updated_by, is_deleted, deleted_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL)`,
+    `INSERT INTO worldbook_entries (id, worldbook_id, key, keysecondary, comment, content, constant, vectorized, selective, selectiveLogic, "order", position, disable, caseSensitive, matchWholeWords, scanDepth, excludeRecursion, preventRecursion, useProbability, probability, depth, sticky, cooldown, delay, displayIndex, raw, created_at, updated_at, created_by, updated_by, is_deleted, deleted_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL)`,
   )
   items.forEach((item, index) => {
     const v = normalizeEntry(item)
     if (item.displayIndex === undefined) v.displayIndex = index
     insert.run(
       uuid(), bookId,
-      toJson(v.keys), toJson(v.secondary_keys), v.comment, v.content,
+      toJson(v.key), toJson(v.keysecondary), v.comment, v.content,
       v.constant ? 1 : 0, v.vectorized ? 1 : 0, v.selective ? 1 : 0, v.selectiveLogic,
-      v.insertionOrder, v.position, v.enabled ? 1 : 0, v.priority,
+      v.order, v.position, v.disable ? 1 : 0,
       v.caseSensitive === null ? null : v.caseSensitive ? 1 : 0,
       v.matchWholeWords === null ? null : v.matchWholeWords ? 1 : 0,
       v.scanDepth, v.excludeRecursion ? 1 : 0, v.preventRecursion ? 1 : 0,
@@ -253,18 +251,17 @@ export function replaceEntries(bookId: string, items: Array<Record<string, unkno
 }
 
 interface NormalizedEntry {
-  keys: string[]
-  secondary_keys: string[]
+  key: string[]
+  keysecondary: string[]
   comment: string | null
   content: string
   constant: boolean
   vectorized: boolean
   selective: boolean
   selectiveLogic: number
-  insertionOrder: number
+  order: number
   position: number
-  enabled: boolean
-  priority: number | null
+  disable: boolean
   caseSensitive: boolean | null
   matchWholeWords: boolean | null
   scanDepth: number | null
@@ -303,10 +300,10 @@ function tri(v: unknown): boolean | null {
   return null
 }
 
-// 从 ST 条目对象（含内部模板名或 raw spec 名）规范化为行字段。UI 与导入共用。
+// 从 ST 条目对象规范化为行字段。UI 与导入共用；字段名即 ST 编辑器内部格式（key/keysecondary/order/disable/...）。
 export function normalizeEntry(src: Record<string, unknown>): NormalizedEntry {
-  const keys = strArray(src.keys ?? src.key)
-  const secondary_keys = strArray(src.secondary_keys ?? src.keysecondary)
+  const key = strArray(src.key ?? src.keys)
+  const keysecondary = strArray(src.keysecondary ?? src.secondary_keys)
   const raw = src.raw as Record<string, unknown> | undefined
   const delayUntil = src.delayUntilRecursion !== undefined ? src.delayUntilRecursion : (raw?.delayUntilRecursion ?? false)
   let position = num(src.position, 0) ?? 0
@@ -316,18 +313,17 @@ export function normalizeEntry(src: Record<string, unknown>): NormalizedEntry {
     else if (src.position === 'before_char') position = 0
   }
   return {
-    keys,
-    secondary_keys,
+    key,
+    keysecondary,
     comment: typeof src.comment === 'string' ? src.comment : null,
     content: typeof src.content === 'string' ? src.content : '',
     constant: bool(src.constant),
     vectorized: bool(src.vectorized) || (raw?.vectorized === true),
     selective: bool(src.selective, false),
     selectiveLogic: num(src.selectiveLogic ?? raw?.selectiveLogic, 0) ?? 0,
-    insertionOrder: num(src.insertionOrder ?? src.order ?? src.insertion_order ?? raw?.insertion_order, 100) ?? 100,
+    order: num(src.order ?? src.insertionOrder ?? src.insertion_order ?? raw?.insertion_order, 100) ?? 100,
     position,
-    enabled: src.enabled === undefined && src.disable !== undefined ? !bool(src.disable) : bool(src.enabled, true),
-    priority: src.priority !== undefined && src.priority !== null ? num(src.priority, 0) : raw?.priority === undefined ? null : num(raw.priority, 0),
+    disable: src.disable !== undefined ? bool(src.disable) : (src.enabled !== undefined ? !bool(src.enabled) : false),
     caseSensitive: src.caseSensitive !== undefined ? tri(src.caseSensitive) : null,
     matchWholeWords: src.matchWholeWords !== undefined ? tri(src.matchWholeWords) : null,
     scanDepth: num(src.scanDepth),
@@ -382,7 +378,7 @@ export function addEntry(bookId: string, patch?: EntryPatch): WorldbookEntryRow 
   src.raw = advancedFrom(src)
   const v = normalizeEntry(src)
   if (src.displayIndex === undefined) {
-    const max = getDb().prepare('SELECT COALESCE(MAX(display_index), -1) AS m FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0').get(bookId) as { m: number }
+    const max = getDb().prepare('SELECT COALESCE(MAX(displayIndex), -1) AS m FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0').get(bookId) as { m: number }
     v.displayIndex = max.m + 1
   }
   applyRoleByPosition(src, v.position)
@@ -390,13 +386,13 @@ export function addEntry(bookId: string, patch?: EntryPatch): WorldbookEntryRow 
   const t = now()
   const id = uuid()
   db.prepare(
-    `INSERT INTO worldbook_entries (id, worldbook_id, keys, secondary_keys, comment, content, constant, vectorized, selective, selective_logic, insertion_order, position, enabled, priority, case_sensitive, match_whole_words, scan_depth, exclude_recursion, prevent_recursion, use_probability, probability, depth, sticky, cooldown, delay, display_index, raw, created_at, updated_at, created_by, updated_by, is_deleted, deleted_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL)`,
+    `INSERT INTO worldbook_entries (id, worldbook_id, key, keysecondary, comment, content, constant, vectorized, selective, selectiveLogic, "order", position, disable, caseSensitive, matchWholeWords, scanDepth, excludeRecursion, preventRecursion, useProbability, probability, depth, sticky, cooldown, delay, displayIndex, raw, created_at, updated_at, created_by, updated_by, is_deleted, deleted_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL)`,
   ).run(
     id, bookId,
-    toJson(v.keys), toJson(v.secondary_keys), v.comment, v.content,
+    toJson(v.key), toJson(v.keysecondary), v.comment, v.content,
     v.constant ? 1 : 0, v.vectorized ? 1 : 0, v.selective ? 1 : 0, v.selectiveLogic,
-    v.insertionOrder, v.position, v.enabled ? 1 : 0, v.priority,
+    v.order, v.position, v.disable ? 1 : 0,
     v.caseSensitive === null ? null : v.caseSensitive ? 1 : 0,
     v.matchWholeWords === null ? null : v.matchWholeWords ? 1 : 0,
     v.scanDepth, v.excludeRecursion ? 1 : 0, v.preventRecursion ? 1 : 0,
@@ -421,11 +417,11 @@ export function updateEntry(bookId: string, entryId: string, patch: EntryPatch):
   const db = getDb()
   const t = now()
   db.prepare(
-    `UPDATE worldbook_entries SET keys=?, secondary_keys=?, comment=?, content=?, constant=?, vectorized=?, selective=?, selective_logic=?, insertion_order=?, position=?, enabled=?, priority=?, case_sensitive=?, match_whole_words=?, scan_depth=?, exclude_recursion=?, prevent_recursion=?, use_probability=?, probability=?, depth=?, sticky=?, cooldown=?, delay=?, display_index=?, raw=?, updated_at=? WHERE id=?`,
+    `UPDATE worldbook_entries SET key=?, keysecondary=?, comment=?, content=?, constant=?, vectorized=?, selective=?, selectiveLogic=?, "order"=?, position=?, disable=?, caseSensitive=?, matchWholeWords=?, scanDepth=?, excludeRecursion=?, preventRecursion=?, useProbability=?, probability=?, depth=?, sticky=?, cooldown=?, delay=?, displayIndex=?, raw=?, updated_at=? WHERE id=?`,
   ).run(
-    toJson(v.keys), toJson(v.secondary_keys), v.comment, v.content,
+    toJson(v.key), toJson(v.keysecondary), v.comment, v.content,
     v.constant ? 1 : 0, v.vectorized ? 1 : 0, v.selective ? 1 : 0, v.selectiveLogic,
-    v.insertionOrder, v.position, v.enabled ? 1 : 0, v.priority,
+    v.order, v.position, v.disable ? 1 : 0,
     v.caseSensitive === null ? null : v.caseSensitive ? 1 : 0,
     v.matchWholeWords === null ? null : v.matchWholeWords ? 1 : 0,
     v.scanDepth, v.excludeRecursion ? 1 : 0, v.preventRecursion ? 1 : 0,
@@ -442,11 +438,11 @@ export function removeEntry(bookId: string, entryId: string): void {
     .run(t, t, bookId, entryId)
 }
 
-// 按给定顺序批量重写 display_index（ST Custom 拖拽排序）。
+// 按给定顺序批量重写 displayIndex（ST Custom 拖拽排序）。
 export function reorderEntries(bookId: string, orderedIds: string[]): void {
   const db = getDb()
   const t = now()
-  const run = db.prepare('UPDATE worldbook_entries SET display_index=?, updated_at=? WHERE worldbook_id=? AND id=?')
+  const run = db.prepare('UPDATE worldbook_entries SET displayIndex=?, updated_at=? WHERE worldbook_id=? AND id=?')
   db.exec('BEGIN')
   try {
     orderedIds.forEach((id, index) => run.run(index, t, bookId, id))
@@ -483,7 +479,7 @@ export function parseStWorldJson(json: string): {
   name?: string
   description?: string
   scanDepth?: number
-  entries: Array<Record<string, unknown> & { raw: unknown; keys: string[]; secondary_keys: string[]; content: string }>
+  entries: Array<Record<string, unknown> & { raw: unknown; key: string[]; keysecondary: string[]; content: string }>
 } {
   let parsed: unknown
   try {
@@ -513,8 +509,8 @@ export function parseStWorldJson(json: string): {
     const ext = (e.extensions ?? {}) as Record<string, unknown>
     out.push({
       ...v,
-      keys: v.keys,
-      secondary_keys: v.secondary_keys,
+      key: v.key,
+      keysecondary: v.keysecondary,
       content: v.content,
       displayIndex: typeof ext.display_index === 'number' ? ext.display_index : undefined,
       raw: rawEntry,
@@ -529,16 +525,17 @@ export function parseStWorldJson(json: string): {
 }
 
 // 导出为一本 ST 世界书 JSON 文本（entries 用序数字符串键，兼容 ST 编辑器内部格式）。
+// 字段名即 ST 编辑器内部格式，直接写出，无需映射。
 export function toStWorldJson(bookId: string): string {
   const book = get(bookId)
   if (!book) throw new Error('世界书不存在')
-  const rows = [...entries(bookId)].sort((a, b) => a.display_index - b.display_index || a.insertion_order - b.insertion_order)
+  const rows = [...entries(bookId)].sort((a, b) => a.displayIndex - b.displayIndex || a.order - b.order)
   const outEntries: Record<string, unknown> = {}
   rows.forEach((row, i) => {
     const view = toEntryView(row)
     const raw = parseJson<Record<string, unknown>>(row.raw, {})
     const base: Record<string, unknown> = { ...raw }
-    base.key = view.keys
+    base.key = view.key
     base.keysecondary = view.keysecondary
     base.content = view.content
     base.comment = view.comment ?? ''
@@ -546,10 +543,9 @@ export function toStWorldJson(bookId: string): string {
     base.vectorized = view.vectorized
     base.selective = view.selective
     base.selectiveLogic = view.selectiveLogic
-    base.order = view.insertionOrder
+    base.order = view.order
     base.position = view.position
-    base.enabled = view.enabled
-    if (view.priority !== null) base.priority = view.priority
+    base.disable = view.disable
     if (view.caseSensitive !== null) base.caseSensitive = view.caseSensitive
     if (view.matchWholeWords !== null) base.matchWholeWords = view.matchWholeWords
     if (view.scanDepth !== null) base.scanDepth = view.scanDepth
@@ -587,22 +583,21 @@ export function toBookView(row: WorldbookRow) {
 
 export function toEntryItem(row: WorldbookEntryRow): Record<string, unknown> {
   const v = toEntryView(row)
-  const stateName = v.constant ? '常驻' : v.vectorized ? '向量' : v.enabled ? '普通' : '禁用'
-  const keysNote = v.keys.length > 0 ? v.keys.join('、') : '(无触发词)'
+  const stateName = v.constant ? '常驻' : v.vectorized ? '向量' : v.disable ? '禁用' : '普通'
+  const keysNote = v.key.length > 0 ? v.key.join('、') : '(无触发词)'
   return {
     id: v.id,
     comment: v.comment,
     content: v.content,
-    keys: v.keys,
+    key: v.key,
     keysecondary: v.keysecondary,
     constant: v.constant,
     vectorized: v.vectorized,
     selective: v.selective,
     selectiveLogic: v.selectiveLogic,
-    insertionOrder: v.insertionOrder,
+    order: v.order,
     position: v.position,
-    enabled: v.enabled,
-    priority: v.priority,
+    disable: v.disable,
     caseSensitive: v.caseSensitive,
     matchWholeWords: v.matchWholeWords,
     scanDepth: v.scanDepth,

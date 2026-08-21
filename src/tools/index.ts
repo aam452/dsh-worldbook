@@ -68,18 +68,16 @@ function scopeGuard(args: Record<string, unknown>): Record<string, JsonValue> | 
 
 // 条目可写字段（ST 全语义；工具只声明可操作的字段名，不指导如何组织内容）
 const ENTRY_FIELDS = {
-  keys: { type: 'array', items: { type: 'string' }, description: '触发关键词（主键）。正则表达式以 / 开头结尾。' },
+  key: { type: 'array', items: { type: 'string' }, description: '触发关键词（主键）。正则表达式以 / 开头结尾。' },
   keysecondary: { type: 'array', items: { type: 'string' }, description: '副关键词。' },
   comment: { type: 'string', description: '条目标题/备注。' },
   content: { type: 'string', description: '条目内容（注入模型上下文的文本）。' },
   constant: { type: 'boolean', description: '常驻：无条件始终注入。' },
   selective: { type: 'boolean', description: '选择性：需结合副关键词。' },
   selectiveLogic: { type: 'string', enum: ['0', '1', '2', '3'], description: '0=AND ANY 1=NOT ALL 2=NOT ANY 3=AND ALL' },
-  insertionOrder: { type: 'integer', description: '注入优先级（越大越优先，list_entries 返回该字段名）。' },
-  order: { type: 'integer', description: '注入优先级别名，等价于 insertionOrder（ST 导出字段名）。' },
+  order: { type: 'integer', description: '注入优先级（越大越优先，list_entries 返回该字段名）。' },
   position: { type: 'string', enum: ['0', '1', '2', '3', '4', '5', '6', '7'], description: '注入位置（ST position 枚举，0=before_char 1=after_char 4=@D）。' },
-  enabled: { type: 'boolean', description: '是否启用该条目。' },
-  priority: { type: 'integer', description: '优先级（ST priority 字段，0-100，高优先级覆盖 order）。' },
+  disable: { type: 'boolean', description: '是否禁用该条目（ST disable 字段，true=禁用）。' },
   vectorized: { type: 'boolean', description: '向量化。' },
   group: { type: 'string', description: '所属分组（组内按 order 胜出）。' },
   groupOverride: { type: 'boolean', description: '组内强制覆盖。' },

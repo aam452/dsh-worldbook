@@ -43,8 +43,8 @@ interface StWorldEntry {
   id: string
   comment: string | null
   content: string
-  keys: string[]
-  enabled: boolean
+  key: string[]
+  disable: boolean
 }
 
 function mapWork(w: { id?: string; workspaceId?: string; title?: string; path?: string }): WorkItem {
@@ -69,7 +69,7 @@ const EntryCard = memo(function EntryCard({ entry, on, onToggle }: { entry: StWo
       onChange: () => onToggle(entry.id),
     }),
     h('div', { style: { flex: 1, minWidth: 0 } },
-      h('div', { style: { fontWeight: 600, fontSize: 13, color: 'var(--ml-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.comment || entry.keys.join(', ') || '（无标题）'),
+      h('div', { style: { fontWeight: 600, fontSize: 13, color: 'var(--ml-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.comment || entry.key.join(', ') || '（无标题）'),
       h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (entry.content || '').slice(0, 40) || '（空内容）'),
     ),
   )
@@ -188,7 +188,7 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
   const filteredEntries = useMemo(() => {
     const q = entrySearch.trim().toLowerCase()
     if (!q) return devBookEntries
-    return devBookEntries.filter((e) => (e.comment ?? '').toLowerCase().includes(q) || (e.content ?? '').toLowerCase().includes(q) || e.keys.join(' ').toLowerCase().includes(q))
+    return devBookEntries.filter((e) => (e.comment ?? '').toLowerCase().includes(q) || (e.content ?? '').toLowerCase().includes(q) || e.key.join(' ').toLowerCase().includes(q))
   }, [devBookEntries, entrySearch])
 
   // 条目分页（前端分页；每页渲染当前页，避免大列表一次性渲染卡顿）

@@ -34,9 +34,9 @@ try {
 console.log('内部格式字段映射:')
 const e0 = wb.entries(book.id)[0]
 const v0 = wb.toEntryView(e0)
-check('keys 有值', Array.isArray(v0.keys))
+check('key 有值', Array.isArray(v0.key))
 check('position 数字枚举', typeof v0.position === 'number')
-check('enabled/constant 布尔', typeof v0.enabled === 'boolean' && typeof v0.constant === 'boolean')
+check('disable/constant 布尔', typeof v0.disable === 'boolean' && typeof v0.constant === 'boolean')
 
 // 2) 未启用 → 不注入
 console.log('注入（未启用为空）:')
@@ -53,15 +53,15 @@ check('命中内容含关键词上下文或常驻', act.some((x) => x.content.le
 console.log('条目 CRUD:')
 const b2 = wb.create('CRUD 书')
 const added = wb.addEntry(b2.id, {
-  keys: ['甲', '乙'], comment: '测试条目', content: '正文', constant: false,
-  selective: true, selectiveLogic: 1, insertionOrder: 50, position: 1,
-  enabled: true, priority: 3, caseSensitive: true, matchWholeWords: false,
+  key: ['甲', '乙'], comment: '测试条目', content: '正文', constant: false,
+  selective: true, selectiveLogic: 1, order: 50, position: 1,
+  disable: false, caseSensitive: true, matchWholeWords: false,
   scanDepth: 4, excludeRecursion: true, preventRecursion: false,
   useProbability: true, probability: 100, depth: 4, sticky: 2, cooldown: 1, delay: 0,
   outletName: 'o1', group: 'g1', groupOverride: false, groupWeight: 100, automationId: 'a1',
 })
 const av = wb.toEntryView(added)
-check('keys=甲,乙', av.keys.join() === '甲,乙')
+check('key=甲,乙', av.key.join() === '甲,乙')
 check('comment=测试条目', av.comment === '测试条目')
 check('selectiveLogic=1', av.selectiveLogic === 1)
 check('position=1(after_char)', av.position === 1)
@@ -74,7 +74,7 @@ const updated = wb.getEntry(b2.id, added.id)
 const uv = wb.toEntryView(updated)
 check('updateEntry 内容=改后', uv.content === '改后')
 check('updateEntry constant=true', uv.constant === true)
-check('updateEntry 保留 keys', uv.keys.join() === '甲,乙')
+check('updateEntry 保留 key', uv.key.join() === '甲,乙')
 
 // 5) ST 导出还原
 console.log('导出还原:')

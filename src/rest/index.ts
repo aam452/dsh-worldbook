@@ -107,7 +107,7 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
         .map((v, i) => ({ v, rowid: i }))
         .filter(({ v }) => {
           if (!q) return true
-          const hay = [v.comment ?? '', v.content, ...v.keys, ...v.keysecondary].join('\n').toLowerCase()
+          const hay = [v.comment ?? '', v.content, ...v.key, ...v.keysecondary].join('\n').toLowerCase()
           return hay.includes(q.toLowerCase())
         })
         .sort((a, b) => {
@@ -117,8 +117,8 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
           let cmp = 0
           switch (sort) {
             case 'priority': {
-              const pa = va.constant ? 0 : va.enabled ? 1 : 2
-              const pb = vb.constant ? 0 : vb.enabled ? 1 : 2
+              const pa = va.constant ? 0 : va.disable ? 2 : 1
+              const pb = vb.constant ? 0 : vb.disable ? 2 : 1
               cmp = pa - pb
               break
             }
@@ -126,18 +126,18 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
             case 'comment': cmp = (va.comment ?? '').localeCompare(vb.comment ?? ''); break
             case 'content': cmp = va.content.length - vb.content.length; break
             case 'depth': cmp = va.depth - vb.depth; break
-            case 'order': cmp = va.insertionOrder - vb.insertionOrder; break
+            case 'order': cmp = va.order - vb.order; break
             case 'uid': cmp = a.rowid - b.rowid; break
             case 'probability': cmp = va.probability - vb.probability; break
             default: cmp = va.displayIndex - vb.displayIndex; break
           }
-          return cmp === 0 ? sign * (va.insertionOrder - vb.insertionOrder) : sign * cmp
+          return cmp === 0 ? sign * (va.order - vb.order) : sign * cmp
         })
       const total = rows.length
       const paged = rows.slice((page - 1) * pageSize, page * pageSize)
       const items = paged.map(({ v }, i) => {
-        const keysNote = v.keys.length > 0 ? v.keys.join('、') : '(无触发词)'
-        const stateName = v.constant ? '常驻' : v.vectorized ? '向量' : v.enabled ? '普通' : '禁用'
+        const keysNote = v.key.length > 0 ? v.key.join('、') : '(无触发词)'
+        const stateName = v.constant ? '常驻' : v.vectorized ? '向量' : v.disable ? '禁用' : '普通'
         return {
           ...v,
           digest: `${keysNote} [${stateName}] ${v.content.slice(0, 120)}`,

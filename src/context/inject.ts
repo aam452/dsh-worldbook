@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { isActiveForSession, type WorkspaceRegistryGateway } from '../data/scope.js'
+import { resolveCharacterContext } from '../data/character.js'
 import { injectMode } from '../data/setting.js'
 import { matchLinesFromMessages, renderWorldbookInjection, AT_DEPTH_POSITION, DEFAULT_AT_DEPTH } from './worldbook.js'
 import { scanWorldbookConflicts } from '../compat.js'
@@ -40,7 +41,10 @@ export function registerContextInjection(ctx: Context): void {
         if (!hasUserInput) return decision
       }
 
-      const world = renderWorldbookInjection(matchLinesFromMessages(decision.messages), { cursor: visibleMessageCursor(agent) })
+      // 角色卡绑定（兼容层）：其它插件提供「当前角色」时按条目 characterFilter 过滤；无则不过滤。
+      const character = resolveCharacterContext(ctx, sessionId)
+
+      const world = renderWorldbookInjection(matchLinesFromMessages(decision.messages), { cursor: visibleMessageCursor(agent), character })
       // @D 位置（4）的条目按 ST 逻辑以「聊天指定深度」插入：depth = 距最新消息的条数；
       // 其余位置的条目维持原有追加行为（合并为一条指令消息）。
       const contextMessages: typeof decision.messages = [...decision.messages]

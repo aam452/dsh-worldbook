@@ -52,16 +52,15 @@ interface StWorldEntry {
   id: string
   comment: string | null
   content: string
-  keys: string[]
+  key: string[]
   keysecondary: string[]
   constant: boolean
   vectorized: boolean
   selective: boolean
   selectiveLogic: 0 | 1 | 2 | 3
-  insertionOrder: number
+  order: number
   position: number
-  enabled: boolean
-  priority: number | null
+  disable: boolean
   caseSensitive: boolean | null
   matchWholeWords: boolean | null
   scanDepth: number | null
@@ -411,8 +410,8 @@ function decodeBase64(latin1: Uint8Array): string {
 
 function blankEntry(): StWorldEntry {
   return {
-    id: '', comment: '', content: '', keys: [], keysecondary: [], constant: false, vectorized: false,
-    selective: false, selectiveLogic: 0, insertionOrder: 100, position: 0, enabled: true, priority: null,
+    id: '', comment: '', content: '', key: [], keysecondary: [], constant: false, vectorized: false,
+    selective: false, selectiveLogic: 0, order: 100, position: 0, disable: false,
     caseSensitive: null, matchWholeWords: null, scanDepth: null, useGroupScoring: null,
     excludeRecursion: true, preventRecursion: false, delayUntilRecursion: false, probability: 100,
     useProbability: true, depth: 4, outletName: '', group: '', groupOverride: false, groupWeight: 100,
@@ -545,14 +544,14 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
 
   async function toggleEntryEnabled(en: StWorldEntry) {
     try {
-      await api(`/worldbooks/${props.book.id}/entries/${en.id}`, { method: 'PUT', body: JSON.stringify({ enabled: !en.enabled }) })
+      await api(`/worldbooks/${props.book.id}/entries/${en.id}`, { method: 'PUT', body: JSON.stringify({ disable: !en.disable }) })
       changed(); reloadEntries()
     } catch (e) {
       setMsg('操作失败：' + (e as Error).message)
     }
   }
 
-  const stateName = (e: StWorldEntry) => (e.constant ? '🔵常驻' : e.vectorized ? '🔗向量' : e.enabled ? '🟢普通' : '禁用')
+  const stateName = (e: StWorldEntry) => (e.constant ? '🔵常驻' : e.vectorized ? '🔗向量' : e.disable ? '禁用' : '🟢普通')
 
   return h('div', { className: 'wb-card', style: { maxHeight: 560, display: 'flex', flexDirection: 'column' } },
     h('div', { className: 'wb-card-hd' },
@@ -630,16 +629,16 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
                 h('div', { style: { flex: 1, minWidth: 0, cursor: 'pointer' }, onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } },
                   h('div', { className: 'wb-name' }, (en.comment || '（无标题）')),
                   h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } },
-                    `${stateName(en)} · 顺序 ${en.insertionOrder} · ${en.keys.length ? en.keys.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
+                    `${stateName(en)} · 顺序 ${en.order} · ${en.key.length ? en.key.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
                 ),
                 h('button', {
-                  className: 'wb-btn' + (en.enabled ? '' : ' muted'),
-                  style: en.enabled
+                  className: 'wb-btn' + (!en.disable ? '' : ' muted'),
+                  style: !en.disable
                     ? { color: 'var(--dsw-alias-state-success-primary)', borderColor: 'var(--dsw-alias-state-success-tertiary)', background: 'var(--dsw-alias-state-success-tertiary)' }
                     : { color: 'var(--ml-ink-3)', borderColor: 'var(--ml-line)' },
                   title: '点击切换启用/停用',
                   onClick: () => toggleEntryEnabled(en),
-                }, en.enabled ? '✓ 已启用' : '○ 未启用'),
+                }, !en.disable ? '✓ 已启用' : '○ 未启用'),
                 h('button', { className: 'wb-btn', onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } }, '编辑'),
                 h('button', { className: 'wb-btn danger', onClick: () => deleteEntry(en.id) }, '删除'),
               ),
@@ -723,7 +722,7 @@ function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange
             ),
             h('div', { className: 'wbed-field wbed-num' },
               h('label', { className: 'wbed-label' }, '顺序'),
-              h('input', { className: 'wbed-input', type: 'number', value: String(en.insertionOrder), onChange: (e) => set({ insertionOrder: Number(e.target.value) || 0 }) }),
+              h('input', { className: 'wbed-input', type: 'number', value: String(en.order), onChange: (e) => set({ order: Number(e.target.value) || 0 }) }),
             ),
             h('div', { className: 'wbed-field wbed-num' },
               h('label', { className: 'wbed-label' }, '触发 %'),
@@ -734,7 +733,7 @@ function EntryEditorModal(props: { entry: StWorldEntry; isNew: boolean; onChange
           h('div', { className: 'wbed-row2' },
             h('div', { className: 'wbed-field' },
               h('label', { className: 'wbed-label' }, '主要关键字'),
-              h('input', { className: 'wbed-input', placeholder: '逗号分隔列表', value: en.keys.join(', '), onChange: (e) => set({ keys: splitCsv(e.target.value) }) }),
+              h('input', { className: 'wbed-input', placeholder: '逗号分隔列表', value: en.key.join(', '), onChange: (e: { target: { value: string } }) => set({ key: splitCsv(e.target.value) }) }),
             ),
             h('div', { className: 'wbed-field' },
               h('label', { className: 'wbed-label' }, '可选过滤器'),

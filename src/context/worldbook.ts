@@ -1,10 +1,11 @@
 import * as worldbook from '../data/worldbook.js'
 import { getDb } from '../db/index.js'
 import type { WorldbookRow, WorldbookEntryView } from '../data/worldbook.js'
+import type { CharacterContext } from '../data/character.js'
 
 // 世界书命中注入渲染（对齐 SillyTavern World Info 算法）：
 // - 三态状态：constant（常驻）/vectorized（向量，暂按常驻处理可测）/normal（按触发词）
-// - normal：主键 keys 任一命中进入候选；selective 条目副键 keysecondary 按 selectiveLogic 限定
+// - normal：主键 key 任一命中进入候选；selective 条目副键 keysecondary 按 selectiveLogic 限定
 // - caseSensitive / matchWholeWords 为三态（null=用全局；本项目无全局设置时按关闭处理）
 // - probability / useProbability 概率判定；sticky / cooldown / delay 消息计时
 // - excludeRecursion / preventRecursion 递归控制（本项目单轮不做递归扫描，标记保留）
@@ -14,7 +15,7 @@ import type { WorldbookRow, WorldbookEntryView } from '../data/worldbook.js'
 export interface InjectedWorldEntry {
   content: string
   position: number
-  insertionOrder: number
+  order: number
   depth: number | null
   role: number | null
   reason: string
@@ -65,14 +66,14 @@ function keyHit(keys: string[], text: string, caseSensitive: boolean, matchWhole
 }
 
 function evaluateEntry(entry: WorldbookEntryView, text: string): { hit: boolean; reason: string } {
-  if (!entry.enabled) return { hit: false, reason: 'disabled' }
+  if (entry.disable) return { hit: false, reason: 'disabled' }
   if (entry.content.trim().length === 0) return { hit: false, reason: 'empty' }
   if (entry.constant || entry.vectorized) return { hit: true, reason: entry.constant ? 'constant' : 'vectorized' }
-  if (entry.keys.length === 0) return { hit: false, reason: 'no-keys' }
+  if (entry.key.length === 0) return { hit: false, reason: 'no-keys' }
 
   const caseSensitive = entry.caseSensitive ?? false
   const matchWholeWords = entry.matchWholeWords ?? false
-  const primary = keyHit(entry.keys, text, caseSensitive, matchWholeWords)
+  const primary = keyHit(entry.key, text, caseSensitive, matchWholeWords)
   if (!primary) return { hit: false, reason: 'primary-unmatched' }
 
   // selective：副键按 selectiveLogic 限定（ST 语义：0=AND ANY / 1=NOT ALL / 2=NOT ANY / 3=AND ALL）
@@ -96,9 +97,9 @@ function bookCandidates(
   book: WorldbookRow,
   rows: WorldbookEntryView[],
   messageLines: string[],
-  opts: { cursor: number; depth: number },
+  opts: { cursor: number; depth: number; character?: CharacterContext },
 ): WorldbookEntryView[] {
-  const { cursor, depth } = opts
+  const { cursor, depth, character } = opts
   const timed = worldbook.getTimedEffects(book.id)
   const stickyActive = new Map<string, boolean>() // entryId -> 本轮 sticky 生效
   const cooldownActive = new Map<string, boolean>()
@@ -114,7 +115,7 @@ function bookCandidates(
   const seenAll = new Set<string>()   // 全流程已激活（sticky/递归去重）
 
   // ST 排序：order 越大越靠前
-  const sorted = [...rows].sort((a, b) => b.insertionOrder - a.insertionOrder)
+  const sorted = [...rows].sort((a, b) => b.order - a.order)
 
   // 递归扫描循环
   let recursionText = ''
@@ -127,8 +128,12 @@ function bookCandidates(
 
     for (const view of sorted) {
       if (seenAll.has(view.id)) continue
-      if (!view.enabled) continue
+      if (view.disable) continue
       if (view.content.trim().length === 0) continue
+
+      // 角色卡绑定（兼容层）：条目 characterFilter 按「当前角色」过滤（对齐 ST 4704-4731）。
+      // 无当前角色上下文（无提供方/拿不到角色）时不过滤——本插件无角色卡实体。
+      if (character && !passesCharacterFilter(view, character)) continue
 
       // delay：cursor < delay 时强制注入（不做关键词判定）
       if (view.delay != null && view.delay > 0 && cursor < view.delay) {
@@ -166,7 +171,7 @@ function bookCandidates(
       }
 
       // 关键词判定
-      if (view.keys.length === 0) continue
+      if (view.key.length === 0) continue
       const decision = evaluateEntry(view, scanText)
       if (!decision.hit) continue
 
@@ -213,8 +218,27 @@ function textForView(rows: WorldbookEntryView[], messageLines: string[], depth: 
   return messageLines.slice(-Math.max(1, Math.trunc(depth))).join('\n')
 }
 
+// ST characterFilter 判定（对齐 world-info.js 4704-4731）：
+// - names：当前角色文件名（getCharaFilename，不含扩展名）在名单内 → isExclude ? 排除 : 保留。
+// - tags：当前角色标签 id 与名单交集 → isExclude ? 排除 : 保留。
+function passesCharacterFilter(entry: WorldbookEntryView, character: CharacterContext): boolean {
+  const cf = entry.characterFilter
+  if (!cf) return true
+  if (cf.names.length > 0) {
+    const nameIncluded = cf.names.includes(character.name)
+    const filtered = cf.isExclude ? nameIncluded : !nameIncluded
+    if (filtered) return false
+  }
+  if (cf.tags.length > 0) {
+    const includesTag = character.tags.some((tag) => cf.tags.includes(tag))
+    const filtered = cf.isExclude ? includesTag : !includesTag
+    if (filtered) return false
+  }
+  return true
+}
+
 // 渲染注入：返回命中的条目（按 ST position→order 排序）。messageLines = 最近对话行；cursor = 模型可见消息数（sticky/cooldown/delay 时间游标）。
-export function renderWorldbookInjection(messageLines: string[], opts: { depth?: number; cursor?: number } = {}): InjectedWorldEntry[] {
+export function renderWorldbookInjection(messageLines: string[], opts: { depth?: number; cursor?: number; character?: CharacterContext } = {}): InjectedWorldEntry[] {
   const books = worldbook.listEnabled()
   if (books.length === 0) return []
   const defaultDepth = opts.depth ?? 2
@@ -232,7 +256,7 @@ export function renderWorldbookInjection(messageLines: string[], opts: { depth?:
 
   const candidateViews: WorldbookEntryView[] = []
   for (const book of books) {
-    candidateViews.push(...bookCandidates(book, byBook.get(book.id) ?? [], messageLines, { cursor, depth: defaultDepth }))
+    candidateViews.push(...bookCandidates(book, byBook.get(book.id) ?? [], messageLines, { cursor, depth: defaultDepth, character: opts.character }))
   }
 
   // Inclusion Group 互斥：同 group（非 groupOverride）只保留 order 最高者
@@ -240,11 +264,11 @@ export function renderWorldbookInjection(messageLines: string[], opts: { depth?:
 
   // ST 排序：position 分组（before 0 在前，其余按其枚举顺序），组内 order 降序
   return [...deduped]
-    .sort((a, b) => a.position - b.position || b.insertionOrder - a.insertionOrder)
+    .sort((a, b) => a.position - b.position || b.order - a.order)
     .map((v) => ({
       content: v.content,
       position: v.position,
-      insertionOrder: v.insertionOrder,
+      order: v.order,
       // 深度仅对 @D 位置有效；非 @D 位置深度无效（对齐 ST 注入逻辑）
       depth: v.position === AT_DEPTH_POSITION ? (v.depth ?? DEFAULT_AT_DEPTH) : null,
       role: v.position === AT_DEPTH_POSITION ? (v.role ?? 0) : null,
@@ -277,7 +301,7 @@ function dedupeGroups(views: WorldbookEntryView[]): WorldbookEntryView[] {
   }
   // 每个组只保留 order 最高的一个
   for (const [, list] of groups) {
-    list.sort((a, b) => b.insertionOrder - a.insertionOrder)
+    list.sort((a, b) => b.order - a.order)
     const winner = list[0]
     if (winner && !seen.has(winner.id)) {
       seen.add(winner.id)

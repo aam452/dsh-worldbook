@@ -38,7 +38,8 @@
     "build": "tsc -p tsconfig.json && node scripts/build-assets.mjs && node scripts/build-client.mjs",
     "build:host": "tsc -p tsconfig.json && node scripts/build-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "test:worldbook": "npm run build:host && node scripts/worldbook-smoke.mjs"
+    "test:worldbook": "npm run build:host && node scripts/worldbook-smoke.mjs",
+    "test:worldbook:all": "npm run build:host && node scripts/worldbook-smoke.mjs && node scripts/worldbook-display-smoke.mjs && node scripts/worldbook-inject-smoke.mjs && node scripts/worldbook-recur-smoke.mjs && node scripts/worldbook-char-smoke.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
