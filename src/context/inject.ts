@@ -2,8 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { isActiveForSession, type WorkspaceRegistryGateway } from '../data/scope.js'
-import { resolveCharacterContext } from '../data/character.js'
 import { injectMode } from '../data/setting.js'
+import { resolveSessionInjection } from '../integration/source.js'
 import { matchLinesFromMessages, renderWorldbookInjection, AT_DEPTH_POSITION, DEFAULT_AT_DEPTH } from './worldbook.js'
 import { scanWorldbookConflicts } from '../compat.js'
 
@@ -41,10 +41,16 @@ export function registerContextInjection(ctx: Context): void {
         if (!hasUserInput) return decision
       }
 
-      // 角色卡绑定（兼容层）：其它插件提供「当前角色」时按条目 characterFilter 过滤；无则不过滤。
-      const character = resolveCharacterContext(ctx, sessionId)
+      // 兼容上下文（协议 §5）：兼容总开关关闭时不含任何角色卡绑定数据（characterFilter / 绑定书 / source），
+      // 插件为「全局世界书」单模式；开启后才有角色卡绑定部分。
+      const compat = resolveSessionInjection(ctx, agent)
 
-      const world = renderWorldbookInjection(matchLinesFromMessages(decision.messages), { cursor: visibleMessageCursor(agent), character })
+      const world = renderWorldbookInjection(matchLinesFromMessages(decision.messages), {
+        cursor: visibleMessageCursor(agent),
+        character: compat.character,
+        sourceBooks: compat.sourceBooks,
+        boundBookNames: compat.boundBookNames,
+      })
       // @D 位置（4）的条目按 ST 逻辑以「聊天指定深度」插入：depth = 距最新消息的条数；
       // 其余位置的条目维持原有追加行为（合并为一条指令消息）。
       const contextMessages: typeof decision.messages = [...decision.messages]

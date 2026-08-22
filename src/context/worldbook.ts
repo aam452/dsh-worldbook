@@ -1,7 +1,8 @@
 import * as worldbook from '../data/worldbook.js'
 import { getDb } from '../db/index.js'
-import type { WorldbookRow, WorldbookEntryView } from '../data/worldbook.js'
+import type { WorldbookEntryView } from '../data/worldbook.js'
 import type { CharacterContext } from '../data/character.js'
+import type { Worldbook as WorldbookSourceBook } from '../integration/protocol.js'
 
 // 世界书命中注入渲染（对齐 SillyTavern World Info 算法）：
 // - 三态状态：constant（常驻）/vectorized（向量，暂按常驻处理可测）/normal（按触发词）
@@ -94,7 +95,7 @@ function evaluateEntry(entry: WorldbookEntryView, text: string): { hit: boolean;
 // sticky：激活后持续 sticky 条消息强制注入（跳过概率）；cooldown：命中时若在冷却区间则跳过。
 // delay：cursor < delay 时强制注入。delayUntilRecursion：非递归轮次跳过，递归轮次按 delay 值激活。
 function bookCandidates(
-  book: WorldbookRow,
+  book: { id: string },
   rows: WorldbookEntryView[],
   messageLines: string[],
   opts: { cursor: number; depth: number; character?: CharacterContext },
@@ -237,10 +238,67 @@ function passesCharacterFilter(entry: WorldbookEntryView, character: CharacterCo
   return true
 }
 
+// 单本注入用书：id 用于 timed effects（本库书用真实 id；宿主书用合成 id，无持久 sticky/cooldown）。
+interface InjectionBookUnit {
+  id: string
+  name: string
+  views: WorldbookEntryView[]
+}
+
+// 构建本轮注入的书集合（协议 §5 取书顺序：source → 绑定书按名 → 全局启用书）：
+// 1. 宿主 worldbook.source 提供的书（ST 格式，转成本库条目视图）
+// 2. worldbook.context.books 绑定的书名（按名查本库，含全局未启用但被显式绑定的书）
+// 3. 本库全局启用的书
+function buildInjectionBooks(
+  sourceBooks: WorldbookSourceBook[] | undefined,
+  boundBookNames: string[] | undefined,
+  enabledBooks: readonly { id: string; name: string }[],
+  byBook: ReadonlyMap<string, WorldbookEntryView[]>,
+): InjectionBookUnit[] {
+  const out: InjectionBookUnit[] = []
+  const seenIds = new Set<string>()
+  const seenNames = new Set<string>()
+
+  for (const b of sourceBooks ?? []) {
+    if (seenNames.has(b.name)) continue
+    seenNames.add(b.name)
+    const id = `source:${b.name}`
+    out.push({
+      id,
+      name: b.name,
+      views: (b.entries ?? []).map((e, i) => worldbook.stEntryToView(e, `${id}#${i}`)),
+    })
+  }
+
+  for (const row of worldbook.findByNameMany(boundBookNames ?? [])) {
+    if (seenIds.has(row.id) || seenNames.has(row.name)) continue
+    seenIds.add(row.id)
+    seenNames.add(row.name)
+    out.push({ id: row.id, name: row.name, views: byBook.get(row.id) ?? [] })
+  }
+
+  for (const book of enabledBooks) {
+    if (seenIds.has(book.id) || seenNames.has(book.name)) continue
+    seenIds.add(book.id)
+    seenNames.add(book.name)
+    out.push({ id: book.id, name: book.name, views: byBook.get(book.id) ?? [] })
+  }
+
+  return out
+}
+
 // 渲染注入：返回命中的条目（按 ST position→order 排序）。messageLines = 最近对话行；cursor = 模型可见消息数（sticky/cooldown/delay 时间游标）。
-export function renderWorldbookInjection(messageLines: string[], opts: { depth?: number; cursor?: number; character?: CharacterContext } = {}): InjectedWorldEntry[] {
-  const books = worldbook.listEnabled()
-  if (books.length === 0) return []
+export interface InjectionOptions {
+  depth?: number
+  cursor?: number
+  character?: CharacterContext
+  /** 宿主提供的作用域书（worldbook.source.readBooks），ST 格式 */
+  sourceBooks?: WorldbookSourceBook[]
+  /** 绑定到本会话的书名（worldbook.context.books），按名查本库 */
+  boundBookNames?: string[]
+}
+
+export function renderWorldbookInjection(messageLines: string[], opts: InjectionOptions = {}): InjectedWorldEntry[] {
   const defaultDepth = opts.depth ?? 2
   const cursor = opts.cursor ?? 0
 
@@ -254,9 +312,12 @@ export function renderWorldbookInjection(messageLines: string[], opts: { depth?:
     byBook.get(row.worldbook_id)!.push(worldbook.toEntryView(row))
   }
 
+  const units = buildInjectionBooks(opts.sourceBooks, opts.boundBookNames, worldbook.listEnabled(), byBook)
+  if (units.length === 0) return []
+
   const candidateViews: WorldbookEntryView[] = []
-  for (const book of books) {
-    candidateViews.push(...bookCandidates(book, byBook.get(book.id) ?? [], messageLines, { cursor, depth: defaultDepth, character: opts.character }))
+  for (const unit of units) {
+    candidateViews.push(...bookCandidates(unit, unit.views, messageLines, { cursor, depth: defaultDepth, character: opts.character }))
   }
 
   // Inclusion Group 互斥：同 group（非 groupOverride）只保留 order 最高者

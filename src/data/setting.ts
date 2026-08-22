@@ -131,6 +131,43 @@ export function setDevPerms(value: DevPerm[]): void {
   set('devPerms', JSON.stringify(Array.from(new Set(value)).filter((x): x is DevPerm => allowed.includes(x))), 'general')
 }
 
+// ── 兼容宿主插件（世界书接管协议，见 docs/DEVELOPMENT.md）──
+// 开启后：provide worldbook.engine（声明接管）、消费 worldbook.context / worldbook.source。
+export function compatEnabled(): boolean {
+  return get('compatEnabled') === 'true'
+}
+
+export function setCompatEnabled(value: boolean): void {
+  set('compatEnabled', value ? 'true' : 'false', 'general')
+}
+
+// 向宿主暴露世界书操作接口：决定是否 provide('worldbook.operations') 供 Host 脚本/能力调用。
+export function exposeOperations(): boolean {
+  return get('exposeOperations') === 'true'
+}
+
+export function setExposeOperations(value: boolean): void {
+  set('exposeOperations', value ? 'true' : 'false', 'general')
+}
+
+// 兼容 dsh-agent-rp：本模块开关（通用 compatEnabled 是总闸门，本开关决定 agent-rp 适配是否挂载）。
+export function agentRpCompat(): boolean {
+  return get('agentRpCompat') === 'true'
+}
+
+export function setAgentRpCompat(value: boolean): void {
+  set('agentRpCompat', value ? 'true' : 'false', 'general')
+}
+
+// agent-rp 兼容调试：打开后在控制台实时打印每个 agent-rp 会话本插件看到/注入了什么（角色/绑定书/source 书）。
+export function agentRpDebug(): boolean {
+  return get('agentRpDebug') === 'true'
+}
+
+export function setAgentRpDebug(value: boolean): void {
+  set('agentRpDebug', value ? 'true' : 'false', 'general')
+}
+
 // ── 工作区作用域 ──
 export type WorkspaceMode = 'all' | 'selected'
 

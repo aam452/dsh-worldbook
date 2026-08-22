@@ -96,12 +96,19 @@ npm run test:worldbook  # 核心逻辑冒烟测试（先 build:host）
 ```ts
 renderWorldbookInjection(
   messageLines: string[],                       // 本次扫描的文本行（深度截断后的最近消息）
-  opts: { depth?: number; cursor?: number } = {}, // depth=扫描最近 N 条；cursor=时间游标（sticky/cooldown/delay）
+  opts: {
+    depth?: number
+    cursor?: number                             // 时间游标（sticky/cooldown/delay）
+    character?: CharacterContext                // 当前角色（worldbook.context.character，见第七章）
+    sourceBooks?: Worldbook[]                   // 宿主提供的书（worldbook.source，ST 格式）
+    boundBookNames?: string[]                   // 绑定到本会话的书名（worldbook.context.books）
+  } = {},
 ): InjectedWorldEntry[]
 ```
 
 - `cursor` 语义对齐 ST `chat.length`：只随真实对话消息（直接用户消息 + assistant 消息）推进，排除插件注入消息与系统快照。
 - `matchLinesFromMessages(messages)` 从 dsh 消息数组提取文本行，供引擎扫描。
+- 取书顺序：`sourceBooks` → `boundBookNames` 按名查本库 → 全局启用书，同级去重（source 优先于同名本库书）。
 
 ### 4.2 已实现语义（对齐 ST world-info.js）
 
@@ -120,7 +127,7 @@ renderWorldbookInjection(
 | 概率 | useProbability + probability 百分比 |
 | 组互斥 | 同组按 order 胜出 |
 | 排序 | 注入按 order 降序；展示用 displayIndex |
-| 角色卡绑定 | 条目 `characterFilter` 按「当前角色」过滤（兼容层，见 4.4） |
+| 角色卡绑定 | 条目 `characterFilter` 按「当前角色」过滤；绑定书按名注入（兼容层，见第七章） |
 
 
 
@@ -135,10 +142,16 @@ import { openDb } from 'dsh-worldbook/db'
 openDb(dataDir)  // 初始化（也可交给插件 apply 统一初始化）
 
 // 在任意时机：
-const world = renderWorldbookInjection(textLines, { cursor, character })
+const world = renderWorldbookInjection(textLines, {
+  cursor,
+  character,              // { name, tags } 可选——传入时按条目 characterFilter 过滤（见第七章）
+  sourceBooks,            // 宿主 worldbook.source 的书（ST 格式），可选
+  boundBookNames,         // 绑定到本会话的书名，可选
+})
 // world: InjectedWorldEntry[]，取 .content 拼装进你的请求
-// character?: { name, tags } 可选——传入时按条目 characterFilter 过滤（见 4.4）
 ```
+
+兼容开关（`compatEnabled`）是**双模式闸门**：开启后插件才进入「全局 + 角色卡绑定」双模式并消费宿主数据；关闭时纯全局单模式。组装一轮注入的兼容上下文统一走 `resolveSessionInjection(ctx, agent)`（见第七章）。
 
 ## 五、REST API
 
@@ -169,8 +182,8 @@ const world = renderWorldbookInjection(textLines, { cursor, character })
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/settings` | `{ enabled, workspaceMode, workspaceIds, theme, injectMode, devMode, devAction, devBookId, devEntryIds, devPerms }` |
-| PUT | `/settings` | 更新 `{ enabled?\|workspaceMode?\|workspaceIds?\|theme?\|injectMode?\|devMode?\|devAction?\|devBookId?\|devEntryIds?\|devPerms? }` |
+| GET | `/settings` | `{ enabled, workspaceMode, workspaceIds, theme, injectMode, devMode, devAction, devBookId, devEntryIds, devPerms, compatEnabled, exposeOperations }` |
+| PUT | `/settings` | 更新 `{ enabled?\|workspaceMode?\|workspaceIds?\|theme?\|injectMode?\|devMode?\|devAction?\|devBookId?\|devEntryIds?\|devPerms?\|compatEnabled?\|exposeOperations? }`（兼容/操作接口开关变化时即时同步服务注册） |
 
 ## 六、槽位契约（ui内嵌指南）
 
@@ -220,7 +233,7 @@ const world = renderWorldbookInjection(textLines, { cursor, character })
 
 - 组件必须返回 React 元素（返回原生 DOM 会报 `Minified React error #31`）。
 - 用 `subscribe` 监听变化，不要假设加载顺序；槽条目变化要重新同步。
-- 主题：本插件样式限定在 `.dsh-worldbook-root` 作用域，宿主开启时不污染宿主；宿主关闭时独立主题完整可用。主题开发注意点见第七章。
+- 主题：本插件样式限定在 `.dsh-worldbook-root` 作用域，宿主开启时不污染宿主；宿主关闭时独立主题完整可用。主题开发注意点见第八章。
 
 ### 6.5 可能出现的问题（特定场景下才会出现，留意规避）
 
@@ -231,41 +244,126 @@ const world = renderWorldbookInjection(textLines, { cursor, character })
 
 
 
-## 七 角色卡绑定（st移植重点内容）
+## 七、世界书接管协议（通用兼容）
 
-本插件**没有角色卡**。为兼容其它 DSH ST 插件（带角色卡的），实现 ST 的 `characterFilter`
-逻辑：条目可声明 `characterFilter: { isExclude, names, tags }`，注入时按「当前角色」过滤
-（对齐 ST world-info.js 4704-4731，names 比对角色文件名、tags 比对标签 id）。
+与宿主插件（提供角色卡 / 会话 / 预设，可能自带世界书功能的插件）的兼容接口约定。
+**宿主只需实现接口目标（黑盒，实现方式自定），本插件无需改动即可接管其世界书功能。**
+协议实现代码在 `src/integration/`，不绑定任何具体宿主。
 
-> **设计定位（重点）**：对移植 ST 的插件来说，UI 槽位契约（第六节）接入与否无所谓，
-> **角色卡绑定是硬性兼容点**——世界书绑不上角色卡，对 ST 移植插件就是废的。
->
-> 
->
-> 该约定是我们这边单方面定的：本插件没有角色卡，无法预知目标插件如何暴露当前角色，
-> 所以先定下一个稳定的读取协议，让移植方来适配。若目标插件已有自己的角色上下文
-> 网关，应在宿主层写适配器转成此协议，而不是反过来要求本插件去读对方的私有接口。
+### 7.1 角色与双模式
 
-**其它插件如何接入**：注册 `worldbook.characterContext` 服务，提供
-`getCurrentCharacter(sessionId) → { name, tags }`（`name`=角色文件名不含扩展名，
-`tags`=标签 id 数组）。示例：
+- **dsh-worldbook（本插件）**：世界书插件，负责注入、存储、管理。
+- **宿主插件（Host）**：任何想被本插件接管世界书的插件（如 dsh-agent-rp，见 7.6）。
+
+本插件有两种模式，由设置 `compatEnabled`（兼容宿主插件，默认关）作**双模式闸门**：
+
+| 模式 | 行为 |
+|---|---|
+| **全局世界书**（兼容关） | 只注入本库全局启用的书，不消费任何宿主数据 |
+| **全局 + 角色卡绑定**（兼容开） | 额外消费宿主数据：绑定书按名注入、条目按角色过滤、宿主 source 取书 |
+
+### 7.2 总体约定
+
+1. 接口均为 DSH 服务键：`ctx.provide(key, impl)` 提供、`ctx.get(key)` 读取。
+2. 宿主检测到 `worldbook.engine` 存在且 `active === true`，即视为世界书已被接管，**停止自己的注入**（数据保留不动）。
+3. **跨边界引用一律用书名**，不用 id / 路径。
+4. 世界书数据统一 **SillyTavern 世界书格式**（`Worldbook` / `WorldbookEntry`，字段名即 ST 字段名：`key` / `keysecondary` / `order` / `disable` / `content` 等）。
+5. 宿主必须把自己世界书的**注入入口收拢**到 `worldbook.engine` 能检查的位置，否则接口无效。
+
+### 7.3 接口定义
+
+#### 7.3.1 `worldbook.engine` —— 接管声明（本插件提供 / 宿主检查）
 
 ```ts
-ctx.provide('worldbook.characterContext', {
-  getCurrentCharacter(sessionId) {
-    // 从你的角色卡数据里查当前会话角色
-    return { name: 'alice', tags: ['warrior'] }
-  },
-})
+interface WorldbookEngine {
+  active: boolean
+  /** 可选：宿主不再解析自己的世界书，直接向本插件要书。 */
+  getBooks?(events: readonly unknown[]): Worldbook[]
+}
 ```
 
-- 无提供方 / 拿不到角色 → 不做角色过滤（本插件自身无角色，默认全部注入）。
-- 角色卡 JSON 导入：`pickCharacterBook` 自动抽取 CCv2/CCv3 的 `character_book`，
-  条目里的 `characterFilter` 随 `raw` 原样保留、导出还原。
-- 注入引擎签名对外暴露 `renderWorldbookInjection(textLines, { cursor, character })`，
-  不想走服务注册的宿主也可直接传 `character` 完成过滤（见 4.5）。
+- 本插件：`ctx.provide('worldbook.engine', { active })`，`active` 实时反映 `compatEnabled`（关掉立即让宿主恢复）。
+- 宿主：在世界书注入入口检查 `ctx.get('worldbook.engine')?.active === true` 即让位。
 
+#### 7.3.2 `worldbook.context` —— 会话上下文（宿主提供 / 本插件消费）
 
+```ts
+interface WorldbookContext {
+  get(sessionId: string): {
+    character?: { name?: string; tags?: string[] }   // 当前角色，用于条目级 characterFilter
+    books?: string[]                                  // 绑定到本会话的书名
+  }
+}
+```
+
+- 谁持有会话 / 角色生态谁提供（通常宿主）；本插件消费。
+- 无提供方 / 拿不到 → 不过滤、不注入绑定书（优雅降级，不阻塞注入）。
+
+#### 7.3.3 `worldbook.source` —— 世界书数据源（宿主提供 / 本插件消费，可选）
+
+```ts
+interface WorldbookSource {
+  readBooks(events: readonly unknown[]): Worldbook[]  // 本会话作用域内的书（全局 + 聊天 + 角色绑定）
+}
+```
+
+- 宿主把"如果还在注入，会注入哪些书"原样给出；本插件优先用它，不解析宿主私有格式。
+- 未提供时回退本插件自己的库（全局启用书 + 绑定书按名查库）。
+
+#### 7.3.4 `worldbook.operations` —— 世界书操作（本插件提供 / 宿主消费）
+
+```ts
+interface WorldbookOperations {
+  listBooks(): WorldbookBookSummary[]          // { name, entryCount, enabled }
+  getBook(name: string): Worldbook
+  createBook(book: Worldbook): void
+  updateBook(name: string, book: Worldbook): void
+  deleteBook(name: string): void
+  updateEntry(bookName: string, entryIndex: number, entry: Record<string, unknown>): void
+  toggleEntry(bookName: string, entryIndex: number, enabled?: boolean): void
+  setBookEnabled(name: string, enabled: boolean): void
+}
+```
+
+- 宿主的**管理界面 / 命令**和**脚本 / AI 能力**对世界书的一切读写，都通过它完成——保住宿主侧"世界书操作"能力不因接管而失效（具体操作什么、怎么操作，本插件不管）。
+- 实现背后是 data 层（`src/data/worldbook.ts`），协议的书名 / 条目标引映射到 data 层的 id。
+- 暴露与否由设置 `exposeOperations` 控制，可运行时切换（保存设置时即时同步注册）。
+
+### 7.4 对接（握手）
+
+本插件每次注入前走 `resolveSessionInjection(ctx, agent)`（`src/integration/source.ts`）：
+
+1. `compatEnabled` 关 → 返回空（单模式，不碰宿主数据）。
+2. 开 → 探测宿主键：`source` 优先取书 → 合并 `context.books`（按名查本库）与全局启用书，同名去重（source 优先）。
+
+### 7.5 设置项
+
+| 设置 | 说明 | 默认 |
+|---|---|---|
+| 兼容宿主插件 | 双模式闸门，开启才接管 | 关 |
+| 向宿主暴露世界书操作接口 | 决定是否 `provide('worldbook.operations')` | 关 |
+
+### 7.6 角色卡绑定（st 移植重点）
+
+本插件**没有角色卡**，绑定由宿主按名决定：
+
+- **绑定**：宿主在 `worldbook.context.books` 里声明本会话绑定的书名 → 本插件按名在自己的库查书注入，**即使该书全局未启用也会注入**。
+- **角色过滤**：宿主在 `worldbook.context.character` 给出当前角色 `{ name, tags }` → 条目级 `characterFilter` 按 ST 语义过滤（names / tags + isExclude，对齐 world-info.js 4704-4731）。
+- 角色卡 JSON 导入：`pickCharacterBook` 自动抽取 CCv2/CCv3 的 `character_book`，`characterFilter` 随 `raw` 原样保留、导出还原。
+
+> **设计定位（重点）**：对移植 ST 的插件，UI 槽位契约（第六章）接入与否无所谓，**角色卡绑定是硬性兼容点**——世界书绑不上角色卡，对 ST 移植插件就是废的。本插件没有角色卡，无法预知目标插件如何暴露当前角色，故定下 `worldbook.context` 这一稳定协议让移植方适配；若目标插件已有自己的角色上下文网关，应在宿主层写适配器转成此协议。
+
+### 7.7 服务键与实现状态
+
+| 键 | 提供方 | 消费方 | 本插件侧状态 |
+|---|---|---|---|
+| `worldbook.engine` | 本插件 | 宿主 | ✅ 已实现（`src/integration/engine.ts`） |
+| `worldbook.context` | 宿主 | 本插件 | ✅ 消费侧已实现（`src/data/character.ts` + `resolveSessionInjection`） |
+| `worldbook.source` | 宿主 | 本插件 | ✅ 消费侧已实现（`src/integration/source.ts`） |
+| `worldbook.operations` | 本插件 | 宿主 | ✅ 已实现（`src/integration/operations.ts`） |
+
+> 冒烟测试：`npm run test:worldbook:all` 里的 `worldbook-compat-smoke.mjs`（35 项）覆盖协议侧全部行为。
+> 具体宿主的适配（如 dsh-agent-rp 的只读事件解析 / 命令影子 / 工具拦截）：见 `src/compat/agent-rp/README.md`。
 
 ## 八、主题开发
 

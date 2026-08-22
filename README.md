@@ -99,7 +99,7 @@ npx -p @deepseek-ai/dsh@latest dsh --profile web
 
 
 
-### 与 SillyTavern 世界书的注入行为兼容
+### 仿照 SillyTavern 世界书的注入行为实行
 
 按注入引擎的真实实现（`src/context/`），这里分两类说明：**已实现真实注入** 与 **仅兼容格式（存取/导入导出，暂不影响注入）**。
 
@@ -129,13 +129,15 @@ npx -p @deepseek-ai/dsh@latest dsh --profile web
 | 字段 | 说明 |
 | --- | --- |
 | `vectorized` | 无真实向量检索，目前当作常驻处理 |
-| `priority` | 存取保留；注入排序只按 `order`，不按 `priority` |
 | `groupWeight` | 存取保留；组互斥只按 `order`，不用组权重 |
 | `scanDepth`（条目级） | 存取保留；实际扫描范围用固定深度（最近 2 条），条目级不生效 |
 | `role` | 存取保留；@D 条目的深度插入生效，但消息角色统一为「用户」 |
-| `outletName` / `automationId` / `triggers` / `characterFilter` / `matchPersonaDescription` 等 | 存取保留，无注入逻辑 |
+| `outletName` / `automationId` / `triggers` / `matchPersonaDescription` 等 | 存取保留，无注入逻辑 |
 
-另外：非 @D 的 `位置` 只影响**注入顺序**（消息内部排序），不会像 ST 那样把内容放到不同的提示区域（角色定义 / 示例消息 / 作者注释等）；普通位置条目统一追加在上下文末尾。
+另外两个说明：
+
+- `characterFilter`（条目级角色过滤）已有真实注入逻辑：仅当宿主提供「当前角色」上下文（`worldbook.characterContext`，角色卡绑定兼容层）时生效；无角色上下文时不做过滤，全部注入。
+- 非 @D 的 `位置` 只影响**注入顺序**（消息内部排序），不会像 ST 那样把内容放到不同的提示区域（角色定义 / 示例消息 / 作者注释等）；普通位置条目统一追加在上下文末尾。
 
 ---
 

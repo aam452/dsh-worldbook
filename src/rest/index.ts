@@ -3,7 +3,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as worldbook from '../data/worldbook.js'
 import * as setting from '../data/setting.js'
 import { lastCompatReport } from '../compat.js'
+import { agentRpDiagnostic } from '../compat/agent-rp/diagnostic.js'
 import { syncDevTool } from '../tools/index.js'
+import { syncOperations } from '../integration/operations.js'
+import { syncAgentRpCompat } from '../compat/agent-rp/index.js'
 
 const PREFIX = '/api/worldbook'
 
@@ -42,6 +45,11 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
   // GET /compat → 最近一次重复注入检测结果
   if (seg[0] === 'compat' && method === 'GET') {
     return ok(res, lastCompatReport())
+  }
+
+  // GET /compat/agent-rp → agent-rp 兼容诊断（开关状态 + 每个 agent-rp 会话本插件看到了什么）
+  if (seg[0] === 'compat' && seg[1] === 'agent-rp' && method === 'GET') {
+    return ok(res, agentRpDiagnostic())
   }
 
   // 世界书（全局共享，不绑会话；作用域随插件工作区生效范围）
@@ -204,9 +212,17 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
         else if (key === 'devBookId') setting.setDevBookId(typeof value === 'string' ? value : '')
         else if (key === 'devEntryIds') setting.setDevEntryIds(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') : [])
         else if (key === 'devPerms') setting.setDevPerms(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') as setting.DevPerm[] : [])
+        else if (key === 'compatEnabled') setting.setCompatEnabled(value === true || value === 'true')
+        else if (key === 'exposeOperations') setting.setExposeOperations(value === true || value === 'true')
+        else if (key === 'agentRpCompat') setting.setAgentRpCompat(value === true || value === 'true')
+        else if (key === 'agentRpDebug') setting.setAgentRpDebug(value === true || value === 'true')
       }
       // 开发模式开关变化时同步工具注册（开则暴露 schema，关则注销）
       syncDevTool(ctx)
+      // 操作接口开关变化时同步服务注册（开则 provide，关则注销）
+      syncOperations(ctx)
+      // agent-rp 兼容开关变化时同步挂载/卸载适配
+      syncAgentRpCompat(ctx)
       return ok(res, settingAll())
     }
   }
@@ -227,6 +243,10 @@ function settingAll(): Record<string, string> {
     devBookId: setting.devBookId(),
     devEntryIds: JSON.stringify(setting.devEntryIds()),
     devPerms: JSON.stringify(setting.devPerms()),
+    compatEnabled: setting.compatEnabled() ? 'true' : 'false',
+    exposeOperations: setting.exposeOperations() ? 'true' : 'false',
+    agentRpCompat: setting.agentRpCompat() ? 'true' : 'false',
+    agentRpDebug: setting.agentRpDebug() ? 'true' : 'false',
   }
 }
 

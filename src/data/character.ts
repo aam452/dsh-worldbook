@@ -4,8 +4,9 @@
 // characterFilter 语义：条目可声明 `characterFilter: { isExclude, names, tags }`，
 // 注入时按「当前角色」过滤（对齐 ST world-info.js 4704-4731）。
 //
-// 「当前角色」由其它插件提供：它们注册一个 CharacterContextProvider（经 ctx.get 读取），
-// 每次会话给出当前角色上下文 { name, tags }。本插件不创建角色卡实体，只消费该上下文。
+// 「当前角色」由其它插件提供：它们按兼容协议（见 docs/DEVELOPMENT.md 世界书接管协议）注册
+// worldbook.context 提供方（经 ctx.get 读取），每次会话给出当前角色 { name, tags }。
+// 本插件不创建角色卡实体，只消费该上下文。
 
 export interface CharacterContext {
   /** 角色文件名（不含扩展名，对齐 ST getCharaFilename） */
@@ -14,26 +15,43 @@ export interface CharacterContext {
   tags: string[]
 }
 
-export interface CharacterContextProvider {
-  /** 返回某会话的当前角色上下文；无角色/无法确定时返回 undefined */
-  getCurrentCharacter(sessionId: string): CharacterContext | undefined
+export interface WorldbookContext {
+  character?: CharacterContext
+  /** 绑定到本会话的世界书书名（ST extensions.world / charLore 语义） */
+  books?: string[]
 }
 
-// 其它插件注册此服务名的约定键（ctx.provide / ctx.get）。
-export const CHARACTER_PROVIDER_KEY = 'worldbook.characterContext'
+export interface WorldbookContextProvider {
+  /** 返回某会话的上下文（角色 + 绑定书）；无角色/无法确定时返回 undefined */
+  get(sessionId: string): WorldbookContext | undefined
+}
+
+// 兼容协议服务键（src/compat/README.md §4.2）。
+export const CONTEXT_PROVIDER_KEY = 'worldbook.context'
 
 // 解析当前角色上下文：没有提供方或拿不到角色时返回 undefined（此时不做角色过滤）。
 export function resolveCharacterContext(ctx: { get(name: string): unknown }, sessionId: string): CharacterContext | undefined {
-  let provider: CharacterContextProvider | undefined
+  return resolveWorldbookContext(ctx, sessionId)?.character
+}
+
+// 解析完整会话上下文（角色 + 绑定书）：没有提供方时返回 undefined。
+export function resolveWorldbookContext(ctx: { get(name: string): unknown }, sessionId: string): WorldbookContext | undefined {
+  let provider: WorldbookContextProvider | undefined
   try {
-    provider = ctx.get(CHARACTER_PROVIDER_KEY) as CharacterContextProvider | undefined
+    provider = ctx.get(CONTEXT_PROVIDER_KEY) as WorldbookContextProvider | undefined
   } catch {
     provider = undefined
   }
-  if (!provider || typeof provider.getCurrentCharacter !== 'function') return undefined
+  if (!provider || typeof provider.get !== 'function') return undefined
   try {
-    return provider.getCurrentCharacter(sessionId) ?? undefined
+    return provider.get(sessionId)
   } catch {
     return undefined
   }
+}
+
+// 本会话绑定的书名列表（worldbook.context.books）；无提供方或未声明时为空。
+export function resolveBoundBooks(ctx: { get(name: string): unknown }, sessionId: string): string[] {
+  const context = resolveWorldbookContext(ctx, sessionId)
+  return Array.isArray(context?.books) ? context.books.filter((x): x is string => typeof x === 'string') : []
 }

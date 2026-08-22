@@ -127,13 +127,15 @@ The following fields can be imported, edited, exported, and round-tripped, but *
 | Field | Description |
 | --- | --- |
 | `vectorized` | No real vector retrieval; currently treated as constant |
-| `priority` | Preserved; injection ordering uses only `order`, not `priority` |
 | `groupWeight` | Preserved; group mutual exclusion uses only `order`, not group weight |
 | `scanDepth` (entry-level) | Preserved; the actual scan window uses a fixed depth (last 2 messages); entry-level setting has no effect |
 | `role` | Preserved; deep insertion works for @D entries, but the message role is always "user" |
-| `outletName` / `automationId` / `triggers` / `characterFilter` / `matchPersonaDescription` etc. | Preserved, no injection logic |
+| `outletName` / `automationId` / `triggers` / `matchPersonaDescription` etc. | Preserved, no injection logic |
 
-Also: for non-@D entries, `position` only affects **injection order** (internal message ordering); unlike ST, content is not placed into different prompt regions (character definition / example messages / author's note, etc.); regular-position entries are all appended at the end of the context.
+Two additional notes:
+
+- `characterFilter` (entry-level character filtering) **does** have real injection logic: it takes effect only when the host provides a "current character" context (`worldbook.characterContext`, the character-card binding compat layer); without a character context, no filtering is applied and all entries are injected.
+- For non-@D entries, `position` only affects **injection order** (internal message ordering); unlike ST, content is not placed into different prompt regions (character definition / example messages / author's note, etc.); regular-position entries are all appended at the end of the context.
 
 ---
 

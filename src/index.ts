@@ -4,6 +4,8 @@ import { mkdirSync } from 'node:fs'
 import { openDb } from './db/index.js'
 import { registerRest } from './rest/index.js'
 import { registerContextInjection } from './context/inject.js'
+import { applyIntegration } from './integration/index.js'
+import { syncAgentRpCompat } from './compat/agent-rp/index.js'
 import * as tools from './tools/index.js'
 
 export const name = 'dsh-worldbook'
@@ -22,6 +24,8 @@ export function apply(ctx: Context) {
   registerRest(ctx)
   registerContextInjection(ctx)
   tools.apply(ctx)
+  applyIntegration(ctx)
+  syncAgentRpCompat(ctx)
 
   console.log(`[dsh-worldbook] ready: ${dataDir}`)
 }
