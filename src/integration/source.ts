@@ -5,7 +5,7 @@ import * as setting from '../data/setting.js'
 import { WORLDBOOK_SOURCE_KEY, type Worldbook, type WorldbookSource } from './protocol.js'
 
 // 会话世界书来源解析（协议 §4.3 + §4.2）：
-// - sourceBooks：Host 提供的 worldbook.source.readBooks(events) 结果（ST 格式）
+// - sourceBooks：Host 提供的 worldbook.source.readBooks(sessionId) 结果（ST 格式）
 // - boundBookNames：worldbook.context.books（绑定到本会话的书名，按名查 WB 库）
 // 任何一步失败都静默降级为空，不阻塞注入。
 export interface SessionBooks {
@@ -23,7 +23,7 @@ export function resolveSessionBooks(ctx: Context, agent: Agent): SessionBooks {
   let sourceBooks: Worldbook[] | undefined
   if (source && typeof source.readBooks === 'function') {
     try {
-      const books = source.readBooks(agent.session.events)
+      const books = source.readBooks(String(agent.id))
       sourceBooks = Array.isArray(books)
         ? books.filter((b): b is Worldbook => !!b && typeof b.name === 'string' && Array.isArray(b.entries))
         : undefined

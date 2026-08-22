@@ -114,9 +114,9 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
   const injectMode = settings.injectMode === 'every-step' ? 'every-step' : 'per-turn'
   const devModeOn = String(settings.devMode ?? '') === 'true'
   const compatOn = String(settings.compatEnabled ?? '') === 'true'
-  const exposeOpsOn = String(settings.exposeOperations ?? '') === 'true'
-  const agentRpOn = String(settings.agentRpCompat ?? '') === 'true'
-  const agentRpDebugOn = String(settings.agentRpDebug ?? '') === 'true'
+  const exposeOpsOn = compatOn && String(settings.exposeOperations ?? '') === 'true'
+  const agentRpOn = compatOn && String(settings.agentRpCompat ?? '') === 'true'
+  const agentRpDebugOn = compatOn && String(settings.agentRpDebug ?? '') === 'true'
   const devAction = settings.devAction === 'edit' ? 'edit' : 'create'
   const devBookId = settings.devBookId ?? ''
   const selected: string[] = useMemo(() => {
@@ -330,12 +330,12 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
       h('button', { className: 'wb-btn' + (injectMode === 'per-turn' ? ' active' : ''), onClick: () => patch({ injectMode: 'per-turn' }) }, '正文注入'),
       h('button', { className: 'wb-btn' + (injectMode === 'every-step' ? ' active' : ''), onClick: () => patch({ injectMode: 'every-step' }) }, '每轮注入'),
     ),
-    // 兼容宿主插件（世界书接管协议）
-    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '兼容宿主插件'),
+    // 兼容模式总开关
+    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '兼容模式'),
     h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-      h('div', { style: { flex: 1 } },
-        h('div', { className: 'wb-name' }, '接管宿主的世界书'),
-        h('div', { className: 'wb-meta' }, '开启后本插件进入「全局 + 角色卡绑定」双模式：接管宿主插件（提供角色卡/会话的插件）的世界书，其注入让位；关闭时仅全局世界书生效。'),
+       h('div', { style: { flex: 1 } },
+         h('div', { className: 'wb-name' }, '兼容模式'),
+         h('div', { className: 'wb-meta' }, '总开关。关闭后所有兼容模式设置失效，本插件只处理全局世界书；开启后才读取宿主角色卡绑定世界书并接管宿主注入。'),
       ),
       h('div', { className: 'wb-switch' + (compatOn ? '' : ' off'), onClick: () => patch({ compatEnabled: String(!compatOn) }) }),
     ),
@@ -344,15 +344,15 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
         h('div', { className: 'wb-name' }, '向宿主暴露世界书操作接口'),
         h('div', { className: 'wb-meta' }, '开启后提供 worldbook.operations 服务，宿主的脚本 / AI 能力可通过它对本插件的世界书进行读写（增删改、启停）。'),
       ),
-      h('div', { className: 'wb-switch' + (exposeOpsOn ? '' : ' off'), onClick: () => patch({ exposeOperations: String(!exposeOpsOn) }) }),
+       h('div', { className: 'wb-switch' + (exposeOpsOn ? '' : ' off'), style: !compatOn ? { opacity: 0.45, pointerEvents: 'none' } : undefined, onClick: () => patch({ exposeOperations: String(!exposeOpsOn) }) }),
     ),
-    // 兼容 dsh-agent-rp
+    // agent-rp 是一个可选宿主适配器；协议数据仍使用通用 ST character_book。
     h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
       h('div', { style: { flex: 1 } },
         h('div', { className: 'wb-name' }, '兼容 dsh-agent-rp'),
         h('div', { className: 'wb-meta' }, '适配 dsh-agent-rp 会话：拦截其世界书导入落本库、影子其 /rp-world-info 命令、读其会话事件（角色卡书/脚本书）经 worldbook.source/context 注入。需同时开启「接管宿主的世界书」。'),
       ),
-      h('div', { className: 'wb-switch' + (agentRpOn ? '' : ' off'), onClick: () => patch({ agentRpCompat: String(!agentRpOn) }) }),
+       h('div', { className: 'wb-switch' + (agentRpOn ? '' : ' off'), style: !compatOn ? { opacity: 0.45, pointerEvents: 'none' } : undefined, onClick: () => patch({ agentRpCompat: String(!agentRpOn) }) }),
     ),
     // agent-rp 兼容调试
     h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
@@ -360,7 +360,7 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
         h('div', { className: 'wb-name' }, 'agent-rp 兼容调试日志'),
         h('div', { className: 'wb-meta' }, '开启后控制台实时打印每个 agent-rp 会话的角色 / 绑定书 / source 书（每会话每 2 秒一条）。另可访问 /api/worldbook/compat/agent-rp 看全量会话快照。'),
       ),
-      h('div', { className: 'wb-switch' + (agentRpDebugOn ? '' : ' off'), onClick: () => patch({ agentRpDebug: String(!agentRpDebugOn) }) }),
+       h('div', { className: 'wb-switch' + (agentRpDebugOn ? '' : ' off'), style: !compatOn ? { opacity: 0.45, pointerEvents: 'none' } : undefined, onClick: () => patch({ agentRpDebug: String(!agentRpDebugOn) }) }),
     ),
     // 开发世界书模式
     h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '开发世界书模式'),

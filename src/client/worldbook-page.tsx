@@ -11,6 +11,10 @@ function errText(e: unknown): string {
   return e && typeof e === 'object' && 'message' in e ? String((e as ApiErr).message) : String(e)
 }
 
+function OperationToast({ message }: { message: string }) {
+  return h('div', { className: 'wb-operation-toast', role: 'status' }, message)
+}
+
 // ── 世界书选中记忆：退出页面再进入时恢复上次选中的世界书 ──
 const SELECTED_BOOK_CACHE_KEY = 'dsh-worldbook-selected-book'
 
@@ -102,6 +106,14 @@ interface StWorldBook {
   entryCount: number
 }
 
+interface CharacterBookReference {
+  id: string
+  name: string
+  entryCount: number
+  source: 'character-card'
+  localBookId?: string
+}
+
 // 位置选项（对齐 SillyTavern 编辑器的位置下拉：角色定义/示例消息/作者注释前后、@D 系统/用户/AI、锚点）
 const POSITION_OPTIONS = [
   { value: 0, role: null, label: '角色定义前 ↑Char' },
@@ -148,8 +160,14 @@ const SORT_HAS_DIRECTION = ['priority', 'comment', 'content', 'depth', 'order', 
 
 function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
   const [books, , reload] = useData<StWorldBook[]>(() => api('/worldbooks'))
+  const [characterBooks, , reloadCharacterBooks] = useData<CharacterBookReference[]>(() => api('/character-books'))
+  const [compatSettings] = useData<{ compatEnabled?: string }>(() => api('/settings'))
   const [selectedId, setSelectedId] = useState<string | null>(() => readSelectedBookCache())
   const [msg, setMsg] = useState('')
+  const [successToast, setSuccessToast] = useState('')
+  const [errorToast, setErrorToast] = useState('')
+  const errorToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const successToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [creating, setCreating] = useState(false)
   const [onlyEnabled, setOnlyEnabled] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -159,20 +177,44 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
   // 选中变化即写缓存，下次进入页面恢复
   useEffect(() => { writeSelectedBookCache(selectedId) }, [selectedId])
 
-  const toggleSelect = (id: string) => setSelectedId((prev) => (prev === id ? null : id))
+  useEffect(() => () => {
+    if (errorToastTimer.current !== null) clearTimeout(errorToastTimer.current)
+    if (successToastTimer.current !== null) clearTimeout(successToastTimer.current)
+  }, [])
 
-  const refresh = useCallback(() => { changed(); reload() }, [reload])
+  const showErrorToast = useCallback((error: unknown) => {
+    if (errorToastTimer.current !== null) clearTimeout(errorToastTimer.current)
+    setErrorToast(errText(error))
+    errorToastTimer.current = setTimeout(() => {
+      setErrorToast('')
+      errorToastTimer.current = null
+    }, 5000)
+  }, [])
+
+  const showSuccessToast = useCallback((message: string) => {
+    if (successToastTimer.current !== null) clearTimeout(successToastTimer.current)
+    setSuccessToast(message)
+    successToastTimer.current = setTimeout(() => {
+      setSuccessToast('')
+      successToastTimer.current = null
+    }, 2000)
+  }, [])
+
+  const toggleSelect = (id: string) => setSelectedId((prev) => (prev === id ? null : id))
+  const selectBook = (id: string) => setSelectedId(id)
+
+  const refresh = useCallback(() => { changed(); reload(); reloadCharacterBooks() }, [reload, reloadCharacterBooks])
 
   async function handleCreated(name: string) {
     setCreating(true)
     try {
       await api('/worldbooks', { method: 'POST', body: JSON.stringify({ name }) })
-      setMsg('已新建：' + name)
+      showSuccessToast('新建成功')
       const next = await api<StWorldBook[]>('/worldbooks')
       setSelectedId(next.find((b) => b.name === name)?.id ?? null)
       refresh()
     } catch (e) {
-      setMsg('新建失败：' + (e as Error).message)
+      showErrorToast('新建失败：' + (e as Error).message)
     } finally {
       setCreating(false)
     }
@@ -182,17 +224,51 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
     const ok = await showConfirm({ title: '删除世界书', message: `确定删除世界书「${book.name}」？其下 ${book.entryCount} 条条目将一并删除。`, danger: true, confirmText: '删除' })
     if (!ok) return
     api(`/worldbooks/${book.id}`, { method: 'DELETE' }).then(() => {
-      setMsg('已删除')
+      showSuccessToast('删除成功')
       if (selectedId === book.id) setSelectedId(null)
       refresh()
-    }).catch((e) => setMsg('删除失败：' + (e as Error).message))
+    }).catch((e) => showErrorToast('删除失败：' + errText(e)))
   }
 
   return h('div', { className: 'wb-page' },
-    // 卡1：新建 + 已有世界书列表（可选中）
+    errorToast
+      ? h('div', { className: 'wb-error-toast', role: 'alert' },
+          h('div', { className: 'wb-error-toast-title' }, '操作失败'),
+          h('div', { className: 'wb-error-toast-message' }, errorToast),
+        )
+      : null,
+    successToast
+      ? h(OperationToast, { message: successToast })
+      : null,
+    compatSettings?.compatEnabled === 'true' && characterBooks && characterBooks.length > 0
+      ? h('div', { className: 'wb-card', style: { maxHeight: 240, display: 'flex', flexDirection: 'column' } },
+          h('div', { className: 'wb-card-hd' }, '当前角色卡绑定的世界书', h('span', { style: { flex: 1 } })),
+          h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },
+            characterBooks.map((book) => h('div', {
+              key: book.id,
+              className: 'wb-row' + (book.localBookId === selectedId ? ' selected' : ''),
+              onClick: () => book.localBookId && selectBook(book.localBookId),
+              title: book.localBookId ? '选择后在下方编辑' : '该书尚未进入本地编辑库',
+              style: { cursor: book.localBookId ? 'pointer' : 'default' },
+            },
+              h('input', {
+                type: 'radio', name: 'wb-character-select', className: 'wb-radio', checked: book.localBookId !== undefined && book.localBookId === selectedId,
+                disabled: !book.localBookId,
+                onChange: () => book.localBookId && selectBook(book.localBookId),
+                onClick: (e) => { e.stopPropagation(); if (book.localBookId) selectBook(book.localBookId) },
+              }),
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                h('div', { className: 'wb-name' }, book.name),
+                h('div', { className: 'wb-meta' }, `${book.entryCount} 条目 · 角色卡绑定`),
+              ),
+            )),
+          ),
+        )
+      : null,
+    // 卡2：新建 + 已有世界书列表（可选中）
     h('div', { className: 'wb-card', style: { maxHeight: 320, display: 'flex', flexDirection: 'column' } },
       h('div', { className: 'wb-card-hd' },
-        '世界书',
+        '全局世界书',
         h('span', { style: { flex: 1 } }),
         h('button', { className: 'wb-btn', title: '插件设置：主题、启用开关、生效工作区、开发模式', onClick: () => setShowSettings(true) }, '⚙ 设置'),
         h('button', { className: 'wb-btn' + (onlyEnabled ? ' active' : ''), title: onlyEnabled ? '显示全部世界书' : '只显示已启用的世界书', onClick: () => { setOnlyEnabled(!onlyEnabled); setSelectedId(null) } }, onlyEnabled ? '已启用 ✓' : '只看已启用'),
@@ -200,7 +276,7 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
         h('button', { className: 'wb-btn', disabled: !selected, onClick: () => selected && downloadWorldbook(selected) }, '导出'),
         h('label', { className: 'wb-btn', style: { cursor: 'pointer' } },
           '导入',
-          h('input', { type: 'file', accept: '.json,.png,application/json,image/png', style: { display: 'none' }, onChange: (e) => onWorldbookImport(e, () => { setMsg('导入成功 ✓'); refresh() }, (id) => setSelectedId(id)) }),
+          h('input', { type: 'file', accept: '.json,.png,application/json,image/png', style: { display: 'none' }, onChange: (e) => onWorldbookImport(e, (message) => { showSuccessToast(message); refresh() }, (id) => setSelectedId(id)) }),
         ),
       ),
       h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },
@@ -242,7 +318,6 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
           h('div', { className: 'wb-hint' }, '从上方选择一本世界书开始编辑。'),
         ),
       ),
-    msg ? h('div', { className: 'wb-hint' }, msg) : null,
     creating ? h(NewWorldbookModal, { onConfirm: handleCreated, onClose: () => setCreating(false) }) : null,
     showSettings ? h(WorldbookSettingsDialog, { workspaces, onClose: () => setShowSettings(false) }) : null,
   )
@@ -280,13 +355,17 @@ function downloadWorldbook(book: StWorldBook) {
     const blob = new Blob([json.data.json], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `${book.name || 'worldbook'}-${Date.now()}.json`
+    const safeName = (book.name || 'worldbook')
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+      .replace(/[. ]+$/g, '') || 'worldbook'
+    a.download = `${safeName}.json`
     a.click()
     URL.revokeObjectURL(a.href)
   }).catch((e) => { void showAlert({ title: '导出失败', message: (e as Error).message }) })
 }
 
-function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: () => void, onSelect: (id: string) => void) {
+function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: (message: string) => void, onSelect: (id: string) => void) {
   const file = e.target.files?.[0]
   if (!file) return
   const isPng = /\.png$/i.test(file.name)
@@ -304,9 +383,13 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
       }
       // 从角色卡 JSON 抽取世界书对象（CCv2/CCv3），纯世界书 JSON 原样返回；剔除角色数据只导入世界书。
       const worldRoot = pickCharacterBook(parsed) ?? parsed
-      // ST 世界书 JSON 顶层通常只有 entries 无 name（如 temp/原版世界书.json），名字优先取 JSON 内 name，否则取文件名（去扩展名）
-      const jsonName = typeof (worldRoot as { name?: unknown }).name === 'string' ? (worldRoot as { name: string }).name.trim() : ''
-      const fileName = jsonName || file.name.replace(/\.(json|png)$/i, '') || '导入世界书'
+      // SillyTavern 导入纯世界书时使用文件名作为书名，不使用 JSON 顶层 name。
+      // 角色卡则使用其内嵌 character_book.name，因为此时文件名是角色卡名而不是书名。
+      const embeddedBook = pickCharacterBook(parsed)
+      const embeddedName = embeddedBook && typeof embeddedBook.name === 'string' ? embeddedBook.name.trim() : ''
+      const fileName = embeddedBook
+        ? (embeddedName || file.name.replace(/\.(json|png)$/i, '') || '导入世界书')
+        : (file.name.replace(/\.(json|png)$/i, '') || '导入世界书')
       // 已有同名世界书时提示是否更新
       const list = (await api<StWorldBook[]>('/worldbooks')) ?? []
       const existing = fileName ? list.find((b) => b.name === fileName) : undefined
@@ -316,7 +399,7 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
         const res = await fetch(`/api/worldbook/worldbooks/${existing.id}/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ json: JSON.stringify(parsed) }),
+          body: JSON.stringify({ name: fileName, json: JSON.stringify(parsed) }),
         })
         const json = await res.json()
         if (!json.success) throw new Error(json.message || '导入失败')
@@ -329,7 +412,7 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
           const res = await fetch(`/api/worldbook/worldbooks/${created.id}/import`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ json: JSON.stringify(parsed) }),
+            body: JSON.stringify({ name: fileName, json: JSON.stringify(parsed) }),
           })
           const json = await res.json()
           if (!json.success) throw new Error(json.message || '导入失败')
@@ -339,7 +422,7 @@ function onWorldbookImport(e: { target: { files: FileList | null } }, onDone: ()
           throw err
         }
       }
-      onDone()
+      onDone('导入成功')
     } catch (err) {
       const message = (err as Error).message
       // 格式识别失败（含服务端报的条目格式错误）统一提示未识别

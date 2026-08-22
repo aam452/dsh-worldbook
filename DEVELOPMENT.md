@@ -247,13 +247,24 @@ const world = renderWorldbookInjection(textLines, {
 ## 七、世界书接管协议（通用兼容）
 
 与宿主插件（提供角色卡 / 会话 / 预设，可能自带世界书功能的插件）的兼容接口约定。
-**宿主只需实现接口目标（黑盒，实现方式自定），本插件无需改动即可接管其世界书功能。**
+**宿主只需实现接口目标（黑盒，实现方式自定）；宿主不需要使用 SQLite、了解 agent-rp，或复制本插件内部实现。**
 协议实现代码在 `src/integration/`，不绑定任何具体宿主。
+
+### 7.0 协议状态与冻结范围
+
+当前协议版本为 **0.5 冻结候选**，不是仅凭文档即可宣布的最终冻结版本。核心注入协议必须先通过第 7.10 节的独立第三方宿主验收，再将本版本标记为冻结。验收前只允许修复通用协议的矛盾、遗漏和实现偏差，不向核心协议加入宿主私有字段。
+
+本章分为两部分：
+
+- **核心协议**：`worldbook.engine`、`worldbook.context.get`、`worldbook.source`，以及 `source → context.books → global` 的注入流程。任何宿主接入都必须遵守。
+- **可选能力**：`worldbook.operations` 和角色卡世界书管理投影。它们不影响核心注入接入；宿主可以不实现或不消费。
+
+本章的 `Worldbook` 是本协议的 **Worldbook Interop Profile**：字段和语义参考 SillyTavern World Info，但不是 ST 原始导出 JSON 的声明，也不是 ST 全部功能的声明。宿主已经使用同一 profile 时可以直接提供；宿主使用其它内部模型时，只需在 `src/compat/<host>/` 中做一次映射。
 
 ### 7.1 角色与双模式
 
 - **dsh-worldbook（本插件）**：世界书插件，负责注入、存储、管理。
-- **宿主插件（Host）**：任何想被本插件接管世界书的插件（如 dsh-agent-rp，见 7.6）。
+- **宿主插件（Host）**：任何想被本插件接管世界书的插件；具体宿主适配不属于本章协议。
 
 本插件有两种模式，由设置 `compatEnabled`（兼容宿主插件，默认关）作**双模式闸门**：
 
@@ -264,96 +275,138 @@ const world = renderWorldbookInjection(textLines, {
 
 ### 7.2 总体约定
 
-1. 接口均为 DSH 服务键：`ctx.provide(key, impl)` 提供、`ctx.get(key)` 读取。
-2. 宿主检测到 `worldbook.engine` 存在且 `active === true`，即视为世界书已被接管，**停止自己的注入**（数据保留不动）。
-3. **跨边界引用一律用书名**，不用 id / 路径。
-4. 世界书数据统一 **SillyTavern 世界书格式**（`Worldbook` / `WorldbookEntry`，字段名即 ST 字段名：`key` / `keysecondary` / `order` / `disable` / `content` 等）。
-5. 宿主必须把自己世界书的**注入入口收拢**到 `worldbook.engine` 能检查的位置，否则接口无效。
+1. 接口均为 DSH 服务键。服务可以晚注册或注销；消费方必须在每次使用前重新读取，不得永久缓存服务实例。
+2. 宿主必须在每次实际生成请求前读取 `worldbook.engine.active`。一次请求从取书到最终请求完成必须使用同一个接管状态，不得混用宿主注入和本插件注入。
+3. `active === true` 时，宿主所有世界书注入路径让位；`active === false`、服务不存在或服务注销时，宿主恢复自己的注入。
+4. **跨边界书籍引用一律使用精确书名**，不用 id、路径或模糊匹配。书名比较区分大小写；同名书只保留合并优先级最高的第一本。
+5. 世界书交换数据使用本章定义的 **Worldbook Interop Profile**。协议附加的本地操作标识不属于 profile 数据，不得写入宿主原始文件。
+6. 宿主必须把自己世界书的所有注入入口收拢到能检查接管状态的位置，否则无法保证协议语义。
 
 ### 7.3 接口定义
 
 #### 7.3.1 `worldbook.engine` —— 接管声明（本插件提供 / 宿主检查）
 
-```ts
-interface WorldbookEngine {
-  active: boolean
-  /** 可选：宿主不再解析自己的世界书，直接向本插件要书。 */
-  getBooks?(events: readonly unknown[]): Worldbook[]
-}
-```
+`worldbook.engine` 只有一个字段：`active: boolean`。
 
-- 本插件：`ctx.provide('worldbook.engine', { active })`，`active` 实时反映 `compatEnabled`（关掉立即让宿主恢复）。
-- 宿主：在世界书注入入口检查 `ctx.get('worldbook.engine')?.active === true` 即让位。
+- 本插件提供唯一的接管声明，`active` 是动态状态，不是加载时快照。
+- `active === true` 时，宿主必须停止所有自己的世界书注入路径。
+- `active === false`、服务不存在或服务被注销时，宿主必须恢复自己的注入。
+- 宿主只检查 `active`，不读取本插件内部数据，也不需要了解本插件的存储方式。
+- `active` 只控制注入让位，不控制宿主数据是否删除、迁移或同步。
 
 #### 7.3.2 `worldbook.context` —— 会话上下文（宿主提供 / 本插件消费）
 
-```ts
-interface WorldbookContext {
-  get(sessionId: string): {
-    character?: { name?: string; tags?: string[] }   // 当前角色，用于条目级 characterFilter
-    books?: string[]                                  // 绑定到本会话的书名
-  }
-}
-```
+`worldbook.context` 提供按会话读取的上下文。会话不存在或当前无法确定时返回空结果，不抛出业务错误。
+
+`character` 只包含角色名和角色标签；`books` 是绑定到本会话的书名列表。
+
+角色卡世界书管理投影是独立的可选能力，不属于核心注入协议。其正式服务键为 `worldbook.character-books`；若提供，必须只返回当前角色卡实际可见的 ST `character_book` 摘要。只有明确提供本地管理标识的书籍才能复用本插件的编辑操作，其它书籍只能展示。宿主不提供此服务时，不影响核心注入接入。
 
 - 谁持有会话 / 角色生态谁提供（通常宿主）；本插件消费。
 - 无提供方 / 拿不到 → 不过滤、不注入绑定书（优雅降级，不阻塞注入）。
 
 #### 7.3.3 `worldbook.source` —— 世界书数据源（宿主提供 / 本插件消费，可选）
 
-```ts
-interface WorldbookSource {
-  readBooks(events: readonly unknown[]): Worldbook[]  // 本会话作用域内的书（全局 + 聊天 + 角色绑定）
-}
-```
+`worldbook.source` 提供一个按会话读取的方法：`readBooks(sessionId)`，返回该会话作用域内的 ST 世界书列表。
 
-- 宿主把"如果还在注入，会注入哪些书"原样给出；本插件优先用它，不解析宿主私有格式。
-- 未提供时回退本插件自己的库（全局启用书 + 绑定书按名查库）。
+- 宿主把“如果仍由宿主负责，会注入哪些书”以 ST 格式返回；本插件优先使用这些书，不解析宿主私有格式。
+- `sessionId` 是本插件传入的稳定会话标识。宿主自行把它映射到自己的会话对象、状态或事件，不得要求本插件传入宿主事件。
+- 返回空数组表示该会话没有宿主作用域书；服务不可用、会话不存在或读取失败时按空数组处理，不阻塞本插件的全局书注入。
+- 同一列表中出现重复书名时只保留第一次出现的书。
+- 未提供时，本插件只使用自己的全局书和上下文书名引用。
 
 #### 7.3.4 `worldbook.operations` —— 世界书操作（本插件提供 / 宿主消费）
 
-```ts
-interface WorldbookOperations {
-  listBooks(): WorldbookBookSummary[]          // { name, entryCount, enabled }
-  getBook(name: string): Worldbook
-  createBook(book: Worldbook): void
-  updateBook(name: string, book: Worldbook): void
-  deleteBook(name: string): void
-  updateEntry(bookName: string, entryIndex: number, entry: Record<string, unknown>): void
-  toggleEntry(bookName: string, entryIndex: number, enabled?: boolean): void
-  setBookEnabled(name: string, enabled: boolean): void
-}
-```
+`worldbook.operations` 提供以下可选操作：列出书籍、按精确名称读取书籍、新建整本书、替换整本书、按精确名称删除书籍、按稳定 `entryId` 更新或启停条目，以及按名称启停书籍。
 
 - 宿主的**管理界面 / 命令**和**脚本 / AI 能力**对世界书的一切读写，都通过它完成——保住宿主侧"世界书操作"能力不因接管而失效（具体操作什么、怎么操作，本插件不管）。
 - 实现背后是 data 层（`src/data/worldbook.ts`），协议的书名 / 条目标引映射到 data 层的 id。
+- `entryId` 是操作协议的稳定元数据，不是 ST 原生字段；导出或交还宿主时不得依赖或强制写入该字段。
+- `getBook()` 返回的 ST 书籍字段和条目字段必须原样保留；`updateBook()` 是整本书替换，调用方必须传入完整书籍。未知 ST 字段必须透传。
+- `updateEntry()` 是条目部分更新；未提供的字段保持不变。`toggleEntry()` 的 `enabled` 与 ST 的 `disable` 互相转换。
+- 操作成功返回成功结果；目标不存在、名称冲突、参数不合法或版本冲突必须返回明确错误。删除不存在的书可以幂等成功。
+- 操作必须保证单次调用原子完成；调用方不得依赖数组位置。
 - 暴露与否由设置 `exposeOperations` 控制，可运行时切换（保存设置时即时同步注册）。
 
 ### 7.4 对接（握手）
 
-本插件每次注入前走 `resolveSessionInjection(ctx, agent)`（`src/integration/source.ts`）：
+本插件每次注入前读取当前会话的兼容数据：
 
-1. `compatEnabled` 关 → 返回空（单模式，不碰宿主数据）。
-2. 开 → 探测宿主键：`source` 优先取书 → 合并 `context.books`（按名查本库）与全局启用书，同名去重（source 优先）。
+1. 本插件每次请求前读取接管状态；关闭时不消费宿主上下文和来源，宿主继续自己的注入。
+2. 开启时按以下顺序合并：`source` 会话书 → `context.books` 书名引用 → 本插件全局启用书。
+3. 每一层内部按返回顺序保留；跨层按精确书名去重，优先保留前一层。
+4. 宿主服务可以晚于本插件注册，也可以运行时注销；本插件会优雅降级。
+5. 宿主必须保证 `worldbook.engine.active` 与自己的实际让位状态一致。
 
-### 7.5 设置项
+### 7.5 黑盒实现边界
+
+本协议只约定服务键、输入输出和行为，不约定宿主的存储、事件、文件、角色卡结构、命令或 UI 实现。宿主可以用任意内部模型实现，只要满足以下不可省略的语义：
+
+- 会话能由 `sessionId` 稳定定位。
+- `worldbook.engine.active` 为真时，宿主所有世界书注入路径都让位。
+- `worldbook.context.get(sessionId)` 返回当前角色和绑定书名，无法确定时返回空结果。
+- 角色过滤只要求遵循 ST 的 `names`、`tags`、排除标志语义；不要求宿主暴露角色卡原文。
+- 角色卡书管理投影（若提供）只返回 ST `character_book` 摘要，不得暴露宿主私有事件或文件格式。
+- `worldbook.source.readBooks(sessionId)` 只返回该会话作用域书，统一使用 ST 字段。
+- 服务缺失、会话不存在和无匹配书都不会阻塞本插件的全局注入。
+- 书名是跨边界书籍引用；书名比较精确且区分大小写；条目操作使用稳定 `entryId`。
+
+文档中的字段和行为是协议数据契约，不要求宿主采用某种实现代码。协议的数据模型采用与 SillyTavern World Info 对齐的字段和语义，但不宣称覆盖 SillyTavern 的全部功能。宿主如果已经使用本节约定的数据结构，可以直接提供；否则只需在自己的适配层转换为本节约定的数据，不需要改变内部存储。
+
+#### 7.5.1 ST 对齐数据契约
+
+本协议不是任意 SillyTavern World Info 文件的完整兼容声明。协议定义的是一个与 ST World Info 语义对齐的数据 profile。对方如果内部已经使用同一 profile，可以直接提供；如果只有 ST 原始导出文件对象，则需要在宿主适配层做字段映射。
+
+协议书籍字段为：`name: string`（非空）、`description?: string`、`scan_depth?: number`、`recursive_scanning?: boolean`、`extensions?: object` 和 `entries: array`。
+
+协议条目字段为：`key?: string[]`、`keysecondary?: string[]`、`comment?: string|null`、`content?: string`、`constant?: boolean`、`vectorized?: boolean`、`selective?: boolean`、`selectiveLogic?: 0|1|2|3`、`addMemo?: boolean`、`order?: number`、`position?: number`、`disable?: boolean`、`ignoreBudget?: boolean`、`caseSensitive?: boolean|null`、`matchWholeWords?: boolean|null`、`scanDepth?: number|null`、`excludeRecursion?: boolean`、`preventRecursion?: boolean`、`matchPersonaDescription?: boolean`、`matchCharacterDescription?: boolean`、`matchCharacterPersonality?: boolean`、`matchCharacterDepthPrompt?: boolean`、`matchScenario?: boolean`、`matchCreatorNotes?: boolean`、`delayUntilRecursion?: boolean|number`、`useProbability?: boolean|null`、`probability?: number`、`depth?: number`、`outletName?: string`、`group?: string`、`groupOverride?: boolean`、`groupWeight?: number`、`scanDepth?: number|null`、`useGroupScoring?: boolean|null`、`automationId?: string`、`role?: number`、`sticky?: number|null`、`cooldown?: number|null`、`delay?: number|null`、`triggers?: string[]` 和 `characterFilter?: { names?: string[]; tags?: string[]; isExclude?: boolean }`。未提供的可选字段使用协议 profile 默认值。
+
+上面是协议字段名，不是 ST 原始导出 JSON 的完整字段层级。ST 导出映射中，`key` 对应 `keys`，`keysecondary` 对应 `secondary_keys`，`order` 对应 `insertion_order`；`position`、`scanDepth`、`excludeRecursion`、`preventRecursion`、`delayUntilRecursion`、`depth`、`probability`、`caseSensitive`、`matchWholeWords`、`useGroupScoring`、`automationId`、`role`、`sticky`、`cooldown`、`delay` 和 `triggers` 等字段位于 ST 条目的 `extensions` 下。`characterFilter` 是 ST 条目对象字段；角色卡 `character_book` 则使用其独立的 `keys` / `secondary_keys` / `insertion_order` / `enabled` 结构，宿主适配层负责转换。
+
+未知书籍字段和条目扩展字段必须放入 `extensions` 并原样透传。`entryId` 只属于操作协议元数据，不属于 ST 数据，不得写回宿主原始文件。
+
+#### 7.5.2 合并算法
+
+本插件只执行以下确定流程：读取一次本次请求的接管状态；若开启，读取 `source.readBooks(sessionId)`、读取 `context.get(sessionId).books` 书名引用、读取本插件全局启用书；按 `source → context → global` 顺序追加。每一层保持返回顺序；书名以 Unicode 字符串精确比较并区分大小写；遇到已经出现的书名跳过后者。`source` 返回的书已经是宿主最终作用域书，不再按 `context.books` 二次筛选。
+
+`context.books` 只是书名引用，不是 ST 书籍数据；引用不存在时跳过。`source` 缺失、返回空数组、会话不存在或抛错都按空 source 处理。角色过滤只作用于最终合并后的条目，不改变书籍去重结果。
+
+#### 7.5.3 请求时序
+
+宿主在每次生成请求开始前读取一次 `engine.active` 并锁定本次请求的结果。锁定后直到请求完成不得切换数据源；兼容开关变化只影响下一次尚未开始的请求。`active === true` 时宿主不得先生成原生世界书 prompt 再等待本插件结果，必须在自身所有世界书注入入口最前面让位。
+
+#### 7.5.4 服务与错误
+
+服务方法为同步方法；服务不存在、返回值不符合契约或读取抛错时，消费方对可选服务执行优雅降级。一个服务键同一时刻只能有一个有效提供方；提供方替换或注销后，消费方下一次使用时重新读取。
+
+操作服务的方法、参数和返回值以公开协议类型为准。成功操作返回 `void`；`getBook`、`updateBook`、`updateEntry` 等目标不存在或参数无效时抛出 `WorldbookProtocolError`，其 `code` 至少区分 `NOT_FOUND`、`NAME_CONFLICT`、`INVALID_ARGUMENT` 和 `CONFLICT`；重名创建或改名必须失败；删除不存在的书可幂等成功；单次操作必须原子完成。
+
+### 7.6 服务生命周期
+
+- 服务提供方可以晚于本插件加载，也可以在运行时注销。
+- 消费方每次使用前重新读取服务；服务不存在等同于该可选能力不可用。
+- 同一个服务键只允许一个当前有效提供方；多提供方由宿主适配层自行选择，不属于协议能力。
+- 服务注销不会删除任何宿主或本插件数据，只触发优雅降级。
+- 接管状态变化只影响后续尚未开始的请求；正在生成的请求不得中途切换数据源。
+
+### 7.7 设置项
 
 | 设置 | 说明 | 默认 |
 |---|---|---|
 | 兼容宿主插件 | 双模式闸门，开启才接管 | 关 |
 | 向宿主暴露世界书操作接口 | 决定是否 `provide('worldbook.operations')` | 关 |
 
-### 7.6 角色卡绑定（st 移植重点）
+### 7.8 角色卡绑定（ST 移植重点）
 
 本插件**没有角色卡**，绑定由宿主按名决定：
 
 - **绑定**：宿主在 `worldbook.context.books` 里声明本会话绑定的书名 → 本插件按名在自己的库查书注入，**即使该书全局未启用也会注入**。
-- **角色过滤**：宿主在 `worldbook.context.character` 给出当前角色 `{ name, tags }` → 条目级 `characterFilter` 按 ST 语义过滤（names / tags + isExclude，对齐 world-info.js 4704-4731）。
-- 角色卡 JSON 导入：`pickCharacterBook` 自动抽取 CCv2/CCv3 的 `character_book`，`characterFilter` 随 `raw` 原样保留、导出还原。
+- **角色过滤**：宿主在 `worldbook.context.character` 给出当前角色 `{ name, tags }`；条目级角色过滤按 ST 的 names、tags 和排除标志语义执行。
+- 角色卡数据如何取得、保存和导入属于宿主实现，不是通用协议要求。
 
 > **设计定位（重点）**：对移植 ST 的插件，UI 槽位契约（第六章）接入与否无所谓，**角色卡绑定是硬性兼容点**——世界书绑不上角色卡，对 ST 移植插件就是废的。本插件没有角色卡，无法预知目标插件如何暴露当前角色，故定下 `worldbook.context` 这一稳定协议让移植方适配；若目标插件已有自己的角色上下文网关，应在宿主层写适配器转成此协议。
 
-### 7.7 服务键与实现状态
+### 7.9 服务键与实现状态
 
 | 键 | 提供方 | 消费方 | 本插件侧状态 |
 |---|---|---|---|
@@ -361,9 +414,25 @@ interface WorldbookOperations {
 | `worldbook.context` | 宿主 | 本插件 | ✅ 消费侧已实现（`src/data/character.ts` + `resolveSessionInjection`） |
 | `worldbook.source` | 宿主 | 本插件 | ✅ 消费侧已实现（`src/integration/source.ts`） |
 | `worldbook.operations` | 本插件 | 宿主 | ✅ 已实现（`src/integration/operations.ts`） |
+| `worldbook.character-books` | 宿主 | 管理页（可选） | ✅ 消费侧已实现；宿主适配可选 |
 
-> 冒烟测试：`npm run test:worldbook:all` 里的 `worldbook-compat-smoke.mjs`（35 项）覆盖协议侧全部行为。
-> 具体宿主的适配（如 dsh-agent-rp 的只读事件解析 / 命令影子 / 工具拦截）：见 `src/compat/agent-rp/README.md`。
+### 7.10 第三方宿主验收标准
+
+真实宿主或独立模拟宿主在声明接入完成前，必须只依赖本章协议完成以下验收：
+
+1. **最小注册**：不依赖本插件 SQLite、agent-rp、事件对象或私有文件，只提供 `worldbook.context.get(sessionId)`；服务不存在时本插件仍能注入全局书。
+2. **宿主来源**：提供 `worldbook.source.readBooks(sessionId)`，返回一份符合 7.5.1 的 profile 书籍；本插件能注入其条目。
+3. **合并规则**：同时提供 source 书、context 书名引用和全局书，验证顺序为 `source → context → global`，同名保留首次出现。
+4. **会话隔离**：两个 sessionId 返回不同书籍，验证本插件不会串会话。
+5. **角色过滤**：提供 `{ character: { name, tags } }`，验证 `characterFilter` 的 names、tags 和 `isExclude` 语义。
+6. **接管时序**：在一次请求开始前切换 `active`，验证同一个最终请求只出现一个世界书来源；正在生成的请求不因中途状态变化混用来源。
+7. **生命周期**：服务晚注册、注销和读取抛错时，验证核心注入能够优雅降级。
+8. **可选 operations**：若消费 `worldbook.operations`，验证精确书名、稳定 `entryId`、整本替换、部分条目更新、重名错误、`NOT_FOUND` 和 `INVALID_ARGUMENT`。
+
+验收必须由独立宿主数据模型完成，不能直接调用本插件 `src/data/`、`src/context/` 或 agent-rp 适配代码。通过后才可将协议版本从“冻结候选”标记为“冻结”。
+
+> 冒烟测试：`npm run test:worldbook:all` 里的 `worldbook-compat-smoke.mjs` 覆盖协议侧行为。
+> 具体宿主适配不属于通用协议文档，应由宿主适配层另行说明。
 
 ## 八、主题开发
 

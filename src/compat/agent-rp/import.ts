@@ -17,8 +17,8 @@
 import type { Worldbook } from '../../integration/protocol.js'
 import * as setting from '../../data/setting.js'
 import * as worldbook from '../../data/worldbook.js'
-import { activeCharacterBook } from './events.js'
-import { existsSync, readFileSync, readdirSync, watch } from 'node:fs'
+import { activeCharacterBook, assembleSessionBooks } from './events.js'
+import { existsSync, readFileSync, readdirSync, unlinkSync, watch } from 'node:fs'
 import { join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 
@@ -45,9 +45,19 @@ function saveMap(map: Record<string, string>): void {
   setting.set(MAP_KEY, JSON.stringify(map), 'agent-rp')
 }
 
+
 /** 查询 sourceKey 是否已迁入本库。 */
 export function isMigrated(sourceKey: string): boolean {
-  return loadMap()[sourceKey] !== undefined
+  const map = loadMap()
+  const bookId = map[sourceKey]
+  if (bookId === undefined) return false
+  if (worldbook.get(bookId)) return true
+
+  // 本地书可能已从管理页删除，但 agent-rp 的源书仍然存在。清掉
+  // 残留映射后，下一次读取事件时允许源书重新迁入本库。
+  delete map[sourceKey]
+  saveMap(map)
+  return false
 }
 
 /** sourceKey → 本库 bookId；未迁移返回 undefined。 */
@@ -60,7 +70,13 @@ export function sourceBookName(sourceKey: string): string | undefined {
   const bookId = mappedBookId(sourceKey)
   if (bookId === undefined) return undefined
   const row = worldbook.get(bookId)
-  return row?.name
+  if (row) return row.name
+  const map = loadMap()
+  if (map[sourceKey] !== undefined) {
+    delete map[sourceKey]
+    saveMap(map)
+  }
+  return undefined
 }
 
 /** 手工登记映射（迁移之外的路径，例如角色卡书随卡入库）。 */
@@ -70,19 +86,52 @@ export function mapSourceBook(sourceKey: string, bookId: string): void {
   saveMap(map)
 }
 
+/** 返回绑定到某个本地书的所有 agent-rp 来源标识。 */
+export function sourceKeysForBook(bookId: string): string[] {
+  return Object.entries(loadMap()).flatMap(([sourceKey, mappedId]) => mappedId === bookId ? [sourceKey] : [])
+}
+
+/** 删除本库书时解除所有 agent-rp 来源映射，允许下次从宿主事件重新获取。 */
+export function unmapBook(bookId: string): void {
+  const map = loadMap()
+  let changed = false
+  for (const [sourceKey, mappedId] of Object.entries(map)) {
+    if (mappedId !== bookId) continue
+    delete map[sourceKey]
+    changed = true
+  }
+  if (changed) saveMap(map)
+}
+
+/** 删除通过 agent-rp 世界书库映射的独立世界书源；角色卡书不走此路径。 */
+export function deleteMappedStandaloneSource(bookId: string): void {
+  const map = loadMap()
+  let changed = false
+  for (const [sourceKey, mappedId] of Object.entries(map)) {
+    if (mappedId !== bookId || !sourceKey.startsWith('standalone:library:')) continue
+    const importId = sourceKey.slice('standalone:library:'.length)
+    if (LIBRARY_ID.test(importId)) {
+      for (const suffix of ['.json', '.name']) {
+        const path = join(LIBRARY_ROOT, `${importId}${suffix}`)
+        try { if (existsSync(path)) unlinkSync(path) } catch { /* 源文件删除失败不阻塞本地删除 */ }
+      }
+    }
+    delete map[sourceKey]
+    changed = true
+  }
+  if (changed) saveMap(map)
+}
+
 /** 把一本 ST 格式书按 sourceKey 迁入本库，返回本库书 id 与书名。 */
 export function ensureSourceBook(sourceKey: string, book: Worldbook): { bookId: string; name: string } {
   const existing = mappedBookId(sourceKey)
   if (existing !== undefined) {
     const row = worldbook.get(existing)
-    if (row) return { bookId: row.id, name: row.name }
+    if (row) {
+      return { bookId: row.id, name: row.name }
+    }
   }
   const name = typeof book.name === 'string' && book.name.trim() !== '' ? book.name.trim() : '未命名世界书'
-  const sameName = worldbook.findByName(name)
-  if (sameName) {
-    mapSourceBook(sourceKey, sameName.id)
-    return { bookId: sameName.id, name: sameName.name }
-  }
   const row = worldbook.create(name, {
     ...(typeof book.description === 'string' ? { description: book.description } : {}),
     ...(book.scan_depth !== undefined && book.scan_depth !== null ? { scanDepth: book.scan_depth } : {}),
@@ -90,6 +139,36 @@ export function ensureSourceBook(sourceKey: string, book: Worldbook): { bookId: 
   worldbook.replaceEntries(row.id, Array.isArray(book.entries) ? book.entries : [])
   mapSourceBook(sourceKey, row.id)
   return { bookId: row.id, name: row.name }
+}
+
+/** 修复旧版本按名称合并造成的多个独立来源共享本地书籍映射。 */
+export function repairStandaloneMappings(): string[] {
+  const map = loadMap()
+  const grouped = new Map<string, string[]>()
+  for (const [sourceKey, bookId] of Object.entries(map)) {
+    if (!sourceKey.startsWith('standalone:library:')) continue
+    const list = grouped.get(bookId) ?? []
+    list.push(sourceKey)
+    grouped.set(bookId, list)
+  }
+  const repaired: string[] = []
+  for (const [bookId, sources] of grouped) {
+    if (sources.length < 2 || !worldbook.get(bookId)) continue
+    for (const sourceKey of sources.slice(1)) {
+      const importId = sourceKey.slice('standalone:library:'.length)
+      const asset = LIBRARY_ID.test(importId) ? readLibraryAsset(importId) : null
+      if (!asset) continue
+      const name = asset.name || asset.book.name || '未命名世界书'
+      const row = worldbook.create(name, {
+        ...(typeof asset.book.description === 'string' ? { description: asset.book.description } : {}),
+        ...(asset.book.scan_depth !== undefined && asset.book.scan_depth !== null ? { scanDepth: asset.book.scan_depth } : {}),
+      })
+      worldbook.replaceEntries(row.id, Array.isArray(asset.book.entries) ? asset.book.entries : [])
+      mapSourceBook(sourceKey, row.id)
+      repaired.push(name)
+    }
+  }
+  return repaired
 }
 
 // ── 会话活跃书（本会话内被接管导入的书，按名参与注入） ──
@@ -111,6 +190,34 @@ export function sessionActiveBooks(sessionId: string): string[] {
 
 export function forgetSession(sessionId: string): void {
   sessionBooks.delete(sessionId)
+}
+
+/** 将当前会话仍存在于 agent-rp 事件流中的源书重新同步到本库。 */
+export function ensureSessionSourceBooks(sessionId: string, events: readonly unknown[]): string[] {
+  const names: string[] = []
+  for (const book of assembleSessionBooks(events)) {
+    if (book.sourceKey.startsWith('script:') || isMigrated(book.sourceKey)) {
+      const name = sourceBookName(book.sourceKey)
+      if (name) {
+        rememberSessionBook(sessionId, name)
+        names.push(name)
+      }
+      continue
+    }
+    try {
+      const migrated = ensureSourceBook(book.sourceKey, {
+        name: book.name,
+        entries: book.entries,
+        ...(book.description === undefined ? {} : { description: book.description }),
+        ...(book.scanDepth === undefined ? {} : { scan_depth: book.scanDepth }),
+      })
+      rememberSessionBook(sessionId, migrated.name)
+      names.push(migrated.name)
+    } catch {
+      // 单本书迁移失败不影响其它会话书。
+    }
+  }
+  return [...new Set(names)]
 }
 
 // 角色卡内嵌书迁移：未迁移 → 迁入本库并记为会话活跃，返回本库书名；已迁移 → 返回现名；卡无书 → undefined。

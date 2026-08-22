@@ -16,10 +16,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CONTEXT_PROVIDER_KEY, type CharacterContext, type WorldbookContextProvider } from '../../data/character.js'
-import { activeCharacterBook, type SessionBook } from './events.js'
-import { isMigrated, sourceBookName, sessionActiveBooks, forgetSession, ensureSessionCardBook } from './import.js'
-import { createAgentRpSource } from './adapter.js'
+import { CONTEXT_PROVIDER_KEY, type CharacterContext, type CharacterBookReference, type WorldbookContextProvider } from '../../data/character.js'
+import { WORLDBOOK_CHARACTER_BOOKS_KEY, type WorldbookCharacterBooks } from '../../integration/protocol.js'
+import { assembleSessionBooks, type SessionBook } from './events.js'
+import { isMigrated, sourceBookName, sessionActiveBooks, forgetSession, ensureSessionCardBook, ensureSessionSourceBooks } from './import.js'
+import * as worldbook from '../../data/worldbook.js'
 
 const CHARACTER_CONTEXT_KEY = 'worldbook.characterContext'
 
@@ -59,14 +60,21 @@ function isRegistry(value: unknown): value is WorldbookCharacterContextRegistry 
 
 // 模块级共享状态：会话注册表 + 角色解析注册表（挂载时建立，供 provider 与诊断读取）。
 const sessions = new Map<string, Agent>()
+let currentAgent: Agent | undefined
 let registry: WorldbookCharacterContextRegistry | undefined
 
 // 某会话应注入的本库书名：会话内接管导入的独立书 + 角色卡内嵌书（未迁则迁入）。
 function sessionBooks(agent: Agent | undefined): string[] {
   if (agent === undefined) return []
-  const names = new Set<string>(sessionActiveBooks(String(agent.id)))
+  const sessionId = String(agent.id)
+  const names = new Set<string>(sessionActiveBooks(sessionId))
   try {
-    const cardName = ensureSessionCardBook(String(agent.id), agent.session.events)
+    for (const name of ensureSessionSourceBooks(sessionId, agent.session.events)) names.add(name)
+  } catch {
+    // 事件格式不完整时继续使用已有会话书。
+  }
+  try {
+    const cardName = ensureSessionCardBook(sessionId, agent.session.events)
     if (cardName) names.add(cardName)
   } catch {
     // 解析失败不影响其余书名
@@ -119,14 +127,13 @@ export interface AgentRpSessionSnapshot {
 }
 
 export function agentRpContextSnapshot(): AgentRpSessionSnapshot[] {
-  const source = createAgentRpSource()
   const out: AgentRpSessionSnapshot[] = []
   for (const [sessionId, agent] of sessions) {
     if (!agentRpActiveInSession(agent)) continue
     const context = contextForSession(sessionId)
     const eventBooks: SessionBook[] = []
     try {
-      eventBooks.push(...(source.readBooks(agent.session.events) as SessionBook[]))
+      eventBooks.push(...assembleSessionBooks(agent.session.events))
     } catch {
       // 忽略
     }
@@ -148,25 +155,36 @@ export function agentRpContextSnapshot(): AgentRpSessionSnapshot[] {
 
 export function applyAgentRpContext(ctx: Context): (() => void) | null {
   const disposers: (() => void)[] = []
-  // agent-rp host 模式已 provide → 消费它；否则提供自己的注册表让 agent-rp 注册进来。
-  try {
-    const candidate = ctx.get(CHARACTER_CONTEXT_KEY) as unknown
-    if (isRegistry(candidate)) registry = candidate
-  } catch {
-    registry = undefined
+  // agent-rp 自己负责提供 worldbook.characterContext。本适配层只消费它，绝不
+  // provide 同名服务；延迟探测是为了覆盖 agent-rp 位于本插件之后的加载顺序。
+  let disposed = false
+  const readCharacterContext = (): void => {
+    if (disposed) return
+    try {
+      const candidate = ctx.get(CHARACTER_CONTEXT_KEY) as unknown
+      if (isRegistry(candidate)) {
+        registry = candidate
+        return
+      }
+    } catch {
+      // agent-rp 尚未注册或当前版本没有该服务。
+    }
+    ctx.logger.warn('[dsh-worldbook] 未找到 agent-rp worldbook.characterContext')
   }
-  if (registry === undefined) {
-    registry = createRegistry()
-    disposers.push(ctx.provide(CHARACTER_CONTEXT_KEY, registry))
-  }
+  setImmediate(readCharacterContext)
 
   disposers.push(ctx.on('agent/created', ({ agent }) => {
     sessions.set(String(agent.id), agent)
     sessions.set(String(agent.session.id), agent)
+    currentAgent = agent
+  }, { global: true }))
+  disposers.push(ctx.on('agent/inbox/claimed', ({ agent }) => {
+    currentAgent = agent
   }, { global: true }))
   disposers.push(ctx.on('agent/disposed', ({ agent }) => {
     for (const id of [String(agent.id), String(agent.session.id)]) sessions.delete(id)
     forgetSession(String(agent.id))
+    if (currentAgent === agent) currentAgent = undefined
   }, { global: true }))
 
   const provider: WorldbookContextProvider = {
@@ -174,10 +192,34 @@ export function applyAgentRpContext(ctx: Context): (() => void) | null {
       return contextForSession(sessionId)
     },
   }
+  const characterBooks: WorldbookCharacterBooks = {
+    list() {
+      const out = new Map<string, CharacterBookReference>()
+      const agent = currentAgent
+      if (!agent) return []
+      const sessionId = String(agent.id)
+      for (const card of assembleSessionBooks(agent.session.events).filter(book => book.source === 'character')) {
+        const name = ensureSessionCardBook(sessionId, agent.session.events) ?? card.name
+        const row = worldbook.findByName(name)
+        const key = `${sessionId}:${card.sourceKey}`
+        out.set(key, {
+          id: key,
+          name,
+          entryCount: row ? worldbook.entries(row.id).length : card.entries.length,
+          source: 'character-card',
+          ...(row ? { localBookId: row.id } : {}),
+        })
+      }
+      return [...out.values()]
+    },
+  }
   disposers.push(ctx.provide(CONTEXT_PROVIDER_KEY, provider))
+  disposers.push(ctx.provide(WORLDBOOK_CHARACTER_BOOKS_KEY, characterBooks))
 
   return () => {
+    disposed = true
     for (const dispose of disposers.reverse()) dispose()
+    currentAgent = undefined
     registry = undefined
   }
 }

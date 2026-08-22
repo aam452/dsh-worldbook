@@ -143,7 +143,7 @@ export function setCompatEnabled(value: boolean): void {
 
 // 向宿主暴露世界书操作接口：决定是否 provide('worldbook.operations') 供 Host 脚本/能力调用。
 export function exposeOperations(): boolean {
-  return get('exposeOperations') === 'true'
+  return compatEnabled() && get('exposeOperations') === 'true'
 }
 
 export function setExposeOperations(value: boolean): void {
@@ -152,7 +152,7 @@ export function setExposeOperations(value: boolean): void {
 
 // 兼容 dsh-agent-rp：本模块开关（通用 compatEnabled 是总闸门，本开关决定 agent-rp 适配是否挂载）。
 export function agentRpCompat(): boolean {
-  return get('agentRpCompat') === 'true'
+  return compatEnabled() && get('agentRpCompat') === 'true'
 }
 
 export function setAgentRpCompat(value: boolean): void {
@@ -161,7 +161,7 @@ export function setAgentRpCompat(value: boolean): void {
 
 // agent-rp 兼容调试：打开后在控制台实时打印每个 agent-rp 会话本插件看到/注入了什么（角色/绑定书/source 书）。
 export function agentRpDebug(): boolean {
-  return get('agentRpDebug') === 'true'
+  return compatEnabled() && get('agentRpDebug') === 'true'
 }
 
 export function setAgentRpDebug(value: boolean): void {

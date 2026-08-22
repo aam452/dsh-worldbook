@@ -9,17 +9,33 @@
 //     未迁移 → 原样从事件交给注入引擎（延续旧会话 / 卡书直读）。
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { WORLDBOOK_SOURCE_KEY, type Worldbook, type WorldbookSource } from '../../integration/protocol.js'
 import { assembleSessionBooks } from './events.js'
 import { isMigrated } from './import.js'
 
 export function applyAgentRpSource(ctx: Context): (() => void) | null {
-  return ctx.provide(WORLDBOOK_SOURCE_KEY, createAgentRpSource())
+  const sessions = new Map<string, Agent>()
+  const disposers = [
+    ctx.on('agent/created', ({ agent }) => {
+      sessions.set(String(agent.id), agent)
+      sessions.set(String(agent.session.id), agent)
+    }, { global: true }),
+    ctx.on('agent/disposed', ({ agent }) => {
+      sessions.delete(String(agent.id))
+      sessions.delete(String(agent.session.id))
+    }, { global: true }),
+    ctx.provide(WORLDBOOK_SOURCE_KEY, createAgentRpSource(sessionId => sessions.get(sessionId))),
+  ]
+  return () => {
+    for (const dispose of disposers.reverse()) dispose()
+  }
 }
 
-export function createAgentRpSource(): WorldbookSource {
+export function createAgentRpSource(resolveAgent: (sessionId: string) => Agent | undefined = () => undefined): WorldbookSource {
   return {
-    readBooks(events) {
+    readBooks(sessionId) {
+      const events = resolveAgent(sessionId)?.session.events ?? []
       return assembleSessionBooks(events)
         .filter(book => book.sourceKey.startsWith('script:') || !isMigrated(book.sourceKey))
         .map(book => toWorldbook(book))

@@ -26,7 +26,10 @@ setting.setCompatEnabled(true)
 check('compatEnabled 可开', setting.compatEnabled() === true)
 setting.setCompatEnabled(false)
 setting.setExposeOperations(true)
-check('exposeOperations 可开', setting.exposeOperations() === true)
+check('兼容关闭时 exposeOperations 失效', setting.exposeOperations() === false)
+setting.setCompatEnabled(true)
+check('兼容开启时 exposeOperations 可开', setting.exposeOperations() === true)
+setting.setCompatEnabled(false)
 setting.setExposeOperations(false)
 
 console.log('2) data 层：按名查找')
@@ -34,7 +37,7 @@ const bound = wb.create('绑定书')
 wb.addEntry(bound.id, { key: ['魔'], content: 'C:魔法知识' })
 wb.setEnabled(bound.id, false)
 check('findByName 精确命中', wb.findByName('绑定书')?.id === bound.id)
-check('findByName 大小写兜底', wb.findByName('绑定书')?.id === bound.id)
+check('findByName 大小写不同不命中', wb.findByName('绑定书 ') === null)
 check('findByName 不存在返回 null', wb.findByName('不存在') === null)
 check('findByNameMany 跳过不存在', wb.findByNameMany(['绑定书', '不存在']).length === 1)
 
@@ -49,6 +52,22 @@ const r3 = inj.renderWorldbookInjection(['剑'], {
   sourceBooks: [{ name: '宿主书', entries: [{ key: ['剑'], content: 'C:宿主剑术' }] }],
 })
 check('宿主书条目被注入', r3.some((x) => x.content === 'C:宿主剑术'))
+const profileSource = {
+  name: '规范化宿主书',
+  entries: [{
+    key: ['协议键'],
+    keysecondary: [],
+    content: 'C:规范化 profile',
+    constant: false,
+    selective: false,
+    disable: false,
+    order: 100,
+    position: 0,
+    extensions: { hostField: 'preserved-by-host' },
+  }],
+}
+const rProfile = inj.renderWorldbookInjection(['协议键'], { sourceBooks: [profileSource] })
+check('第三方 profile 书可直接注入', rProfile.some((x) => x.content === 'C:规范化 profile'))
 
 console.log('5) 注入：source + 绑定 + 全局书合并去重')
 const global = wb.create('全局书')
@@ -111,9 +130,10 @@ const ops = createOperations()
 ops.createBook({ name: 'op书', description: 'd', entries: [{ key: ['k'], content: 'C:op' }] })
 check('listBooks 看到新书', ops.listBooks().some((b) => b.name === 'op书' && b.entryCount === 1))
 check('getBook 返回条目', ops.getBook('op书').entries.length === 1)
-ops.updateEntry('op书', 0, { content: 'C:op改' })
+const opEntryId = ops.getBook('op书').entries[0].id
+ops.updateEntry('op书', opEntryId, { content: 'C:op改' })
 check('updateEntry 生效', ops.getBook('op书').entries[0].content === 'C:op改')
-ops.toggleEntry('op书', 0, true)
+ops.toggleEntry('op书', opEntryId, true)
 check('toggleEntry 启用条目', ops.getBook('op书').entries[0].disable === false)
 ops.setBookEnabled('op书', false)
 check('setBookEnabled 停用书', ops.listBooks().find((b) => b.name === 'op书')?.enabled === false)
@@ -124,6 +144,9 @@ check('deleteBook 删除', !ops.listBooks().some((b) => b.name === 'op书2'))
 let threw = false
 try { ops.getBook('不存在书') } catch { threw = true }
 check('操作不存在书抛错', threw)
+let invalidCode = ''
+try { ops.createBook({ name: '', entries: [] }) } catch (error) { invalidCode = error?.code ?? '' }
+check('非法书名返回 INVALID_ARGUMENT', invalidCode === 'INVALID_ARGUMENT')
 
 console.log('9) worldbook.engine active 实时反映设置')
 let provided = null

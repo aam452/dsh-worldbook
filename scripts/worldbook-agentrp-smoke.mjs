@@ -136,15 +136,17 @@ check('卡书迁入本库并返回书名', cardName === 'Alice的书')
 check('卡书 sourceKey 已迁移', arpImport.isMigrated('character:att1') === true)
 check('卡书记为会话活跃', arpImport.sessionActiveBooks('s2').includes('Alice的书'))
 check('重复迁移返回现名', arpImport.ensureSessionCardBook('s2', [characterSeedEvent]) === 'Alice的书')
-check('卡书现可被 source 适配跳过', createAgentRpSource().readBooks([characterSeedEvent]).length === 0)
+check('卡书现可被 source 适配跳过', createAgentRpSource(() => ({ session: { events: [characterSeedEvent] } })).readBooks('s2').length === 0)
 
 console.log('7) worldbook.source 适配（已迁移跳过 / 脚本书直出）')
-const source = createAgentRpSource()
-check('空事件 → 空书', source.readBooks([]).length === 0)
-check('已迁移独立书被跳过', source.readBooks([seedEvent]).length === 0)
-const scriptOut = source.readBooks([tavernEvent])
+const source = createAgentRpSource((sessionId) => ({
+  session: { events: sessionId === 'empty' ? [] : sessionId === 'seed' ? [seedEvent] : sessionId === 'tavern' ? [tavernEvent] : sessionId === 'card' ? [{ ...characterSeedEvent, data: { ...characterSeedEvent.data, meta: { ...characterSeedEvent.data.meta, result: { ...characterSeedEvent.data.meta.result, sourceAttachmentId: 'att2' } } } }] : [] },
+}))
+check('空会话 → 空书', source.readBooks('empty').length === 0)
+check('已迁移独立书被跳过', source.readBooks('seed').length === 0)
+const scriptOut = source.readBooks('tavern')
 check('脚本书原样交给注入引擎', scriptOut.length === 1 && scriptOut[0].name === 'ScriptBook')
-const cardOut = source.readBooks([{ ...characterSeedEvent, data: { ...characterSeedEvent.data, meta: { ...characterSeedEvent.data.meta, result: { ...characterSeedEvent.data.meta.result, sourceAttachmentId: 'att2' } } } }])
+const cardOut = source.readBooks('card')
 check('未迁移卡书直出', cardOut.length === 1 && cardOut[0].name === 'Alice的书')
 
 console.log('8) worldbook.context 桥接')
@@ -153,7 +155,10 @@ function makeCtx(provided = {}) {
   const ctx = {
     provides,
     get(k) { return provided[k] },
-    provide(k, v) { provides.set(k, v); return () => provides.delete(k) },
+    provide(k, v) {
+      if (provides.has(k)) throw new Error(`service "${String(k)}" has been registered`)
+      provides.set(k, v); return () => provides.delete(k)
+    },
     on() { return () => {} },
     logger: { info() {}, warn() {} },
   }
@@ -161,11 +166,21 @@ function makeCtx(provided = {}) {
 }
 const c1 = makeCtx()
 applyAgentRpContext(c1)
+await new Promise(resolve => setImmediate(resolve))
 check('提供 worldbook.context', c1.provides.has('worldbook.context'))
-check('无宿主时提供 worldbook.characterContext', c1.provides.has('worldbook.characterContext'))
-const c2 = makeCtx({ 'worldbook.characterContext': { register() {}, getCurrentCharacter() { return undefined } } })
+check('不抢注册 agent-rp characterContext', !c1.provides.has('worldbook.characterContext'))
+const c2provided = { register() {}, getCurrentCharacter() { return undefined } }
+const c2provides = new Map([['worldbook.characterContext', c2provided]])
+const c2 = {
+  provides: c2provides,
+  get(k) { return k === 'worldbook.characterContext' ? c2provided : undefined },
+  provide(k, v) { if (c2provides.has(k)) throw new Error(`service "${String(k)}" has been registered`); c2provides.set(k, v); return () => c2provides.delete(k) },
+  on() { return () => {} },
+  logger: { info() {}, warn() {} },
+}
 applyAgentRpContext(c2)
-check('host 模式不重复提供 characterContext', !c2.provides.has('worldbook.characterContext'))
+await new Promise(resolve => setImmediate(resolve))
+check('host 模式跳过注册（使用对方提供的）', c2provides.get('worldbook.characterContext') === c2provided)
 check('host 模式仍提供 worldbook.context', c2.provides.has('worldbook.context'))
 const provider = c2.provides.get('worldbook.context')
 const got = provider.get('s1')

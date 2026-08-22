@@ -5,8 +5,9 @@ import * as setting from '../data/setting.js'
 import { lastCompatReport } from '../compat.js'
 import { agentRpDiagnostic } from '../compat/agent-rp/diagnostic.js'
 import { syncDevTool } from '../tools/index.js'
-import { syncOperations } from '../integration/operations.js'
+import { assertBookDeletable, notifyBookDeleted, syncOperations } from '../integration/operations.js'
 import { syncAgentRpCompat } from '../compat/agent-rp/index.js'
+import { WORLDBOOK_CHARACTER_BOOKS_KEY, type WorldbookCharacterBooks } from '../integration/protocol.js'
 
 const PREFIX = '/api/worldbook'
 
@@ -52,6 +53,13 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
     return ok(res, agentRpDiagnostic())
   }
 
+  if (seg[0] === 'character-books' && method === 'GET') {
+    if (!setting.compatEnabled()) return ok(res, [])
+    let provider: WorldbookCharacterBooks | undefined
+    try { provider = ctx.get(WORLDBOOK_CHARACTER_BOOKS_KEY) as WorldbookCharacterBooks | undefined } catch { provider = undefined }
+    try { return ok(res, typeof provider?.list === 'function' ? provider.list() : []) } catch { return ok(res, []) }
+  }
+
   // 世界书（全局共享，不绑会话；作用域随插件工作区生效范围）
   if (seg[0] === 'worldbooks') {
     // GET /worldbooks → 列表（含条目数）
@@ -91,10 +99,7 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
         return json(res, 400, { success: false, message: `导入失败：${(e as Error).message}` })
       }
       worldbook.replaceEntries(seg[1], parsed.entries)
-      if ((parsed.name && worldbook.get(seg[1])?.name === '未命名世界书') || (parsed.name && body.name === undefined)) {
-        worldbook.update(seg[1], { name: parsed.name })
-      }
-      if (body.name !== undefined) worldbook.update(seg[1], { name: String(body.name) })
+       if (body.name !== undefined) worldbook.update(seg[1], { name: String(body.name) })
       if (parsed.scanDepth !== undefined) worldbook.update(seg[1], { scanDepth: parsed.scanDepth })
       return ok(res, worldbook.toBookView(worldbook.get(seg[1])!))
     }
@@ -191,7 +196,10 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
     }
     // DELETE /worldbooks/:id → 删除（含条目）
     if (seg[1] && method === 'DELETE') {
+      const exists = worldbook.get(seg[1])
+      if (exists) assertBookDeletable(exists)
       worldbook.remove(seg[1])
+      if (exists) notifyBookDeleted(exists)
       return ok(res, { deleted: true })
     }
   }

@@ -9,7 +9,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandInvocation } from '@deepseek-ai/dsh-commands'
-import * as worldbook from '../../data/worldbook.js'
+import { WORLDBOOK_OPERATIONS_KEY, type WorldbookOperations } from '../../integration/protocol.js'
 import {
   applyConfigurationRequest,
   encodeWorldInfoConfiguration,
@@ -21,10 +21,6 @@ import { ensureSourceBook, readLibraryAsset, rememberSessionBook, sourceBookName
 
 function resolveBookName(agentRpBookId: string): string | undefined {
   return sourceBookName(agentRpBookId)
-}
-
-function entriesInStOrder(bookId: string): worldbook.WorldbookEntryRow[] {
-  return [...worldbook.entries(bookId)].sort((a, b) => a.displayIndex - b.displayIndex || a.order - b.order)
 }
 
 function editableToStPatch(entry: {
@@ -62,7 +58,15 @@ function editableToStPatch(entry: {
   }
 }
 
+function getOperations(invocation: CommandInvocation): WorldbookOperations {
+  let operations: WorldbookOperations | undefined
+  try { operations = invocation.agent.ctx.get(WORLDBOOK_OPERATIONS_KEY) as WorldbookOperations | undefined } catch { operations = undefined }
+  if (!operations) throw new Error('世界书操作接口未启用，请先开启兼容模式中的操作接口')
+  return operations
+}
+
 function executeConfiguration(invocation: CommandInvocation): { kind: 'success'; text: string } {
+  const operations = getOperations(invocation)
   const request = parseWorldInfoConfigurationRequest(invocation.rawInput)
   const current = readWorldInfoConfiguration(invocation.agent.session.events)
   if (request.operation === 'reset-all' || request.operation === 'set-budget') {
@@ -70,25 +74,25 @@ function executeConfiguration(invocation: CommandInvocation): { kind: 'success';
   }
   const bookName = resolveBookName(request.bookId)
   if (bookName === undefined) throw new Error('目标世界书不存在（未迁移到 dsh-worldbook 库）')
-  const row = worldbook.findByName(bookName)
-  if (!row) throw new Error('目标世界书不存在')
+  const book = operations.getBook(bookName)
   if (request.operation === 'reset-book' || request.operation === 'set-book-enabled') {
     const enable = request.operation === 'reset-book' ? true : request.enabled
-    for (const entry of entriesInStOrder(row.id)) {
-      worldbook.updateEntry(row.id, entry.id, { disable: !enable })
+    for (const entry of book.entries) {
+      if (entry.id) operations.toggleEntry(bookName, entry.id, enable)
     }
     return { kind: 'success', text: encodeWorldInfoConfiguration(applyConfigurationRequest(current, request)) }
   }
-  const entry = entriesInStOrder(row.id)[request.entryIndex]
+  const entry = book.entries[request.entryIndex]
   if (entry === undefined) throw new Error('目标世界书条目不存在')
+  if (!entry.id) throw new Error('目标世界书条目缺少稳定标识')
   if (request.operation === 'edit') {
-    worldbook.updateEntry(row.id, entry.id, editableToStPatch(request.entry))
+    operations.updateEntry(bookName, entry.id, editableToStPatch(request.entry))
   } else if (request.operation === 'toggle') {
-    worldbook.updateEntry(row.id, entry.id, { disable: !request.enabled })
+    operations.toggleEntry(bookName, entry.id, request.enabled)
   } else if (request.operation === 'delete') {
-    worldbook.updateEntry(row.id, entry.id, { disable: request.deleted })
+    operations.toggleEntry(bookName, entry.id, !request.deleted)
   } else if (request.operation === 'reset-entry') {
-    worldbook.updateEntry(row.id, entry.id, { disable: false })
+    operations.toggleEntry(bookName, entry.id, true)
   }
   return { kind: 'success', text: encodeWorldInfoConfiguration(applyConfigurationRequest(current, request)) }
 }
@@ -125,7 +129,7 @@ function makeCommand(
 
 export function applyAgentRpCommands(ctx: Context): (() => void) | null {
   let registered = false
-  let disposeRegistration: (() => void) | null = null
+  const disposeRegistrations: (() => void)[] = []
   const tryRegister = (): void => {
     if (registered) return
     try {
@@ -133,8 +137,10 @@ export function applyAgentRpCommands(ctx: Context): (() => void) | null {
       const commands = (ctx as any).commands
       if (!commands) return
       registered = true
-      disposeRegistration = (commands.register(makeCommand('rp-world-info', executeConfiguration, 'manage this roleplay Session world info (dsh-worldbook)')) as unknown as (() => void)) ?? null
-      commands.register(makeCommand('rp-world-info-import', executeLibraryImport, 'import one Host-owned World Info source (dsh-worldbook)'))
+       const first = commands.register(makeCommand('rp-world-info', executeConfiguration, 'manage this roleplay Session world info (dsh-worldbook)')) as unknown as (() => void)
+       const second = commands.register(makeCommand('rp-world-info-import', executeLibraryImport, 'import one Host-owned World Info source (dsh-worldbook)')) as unknown as (() => void)
+       if (typeof first === 'function') disposeRegistrations.push(first)
+       if (typeof second === 'function') disposeRegistrations.push(second)
     } catch (error) {
       ctx.logger.warn(`[dsh-worldbook] agent-rp 命令注册失败（commands 服务尚未就绪）: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -142,10 +148,9 @@ export function applyAgentRpCommands(ctx: Context): (() => void) | null {
   // 延迟到下个 tick：插件初始化时 commands 可能还未注入 ctx
   setImmediate(tryRegister)
   return () => {
-    tryRegister() // 同步再试一次（万一 setImmediate 时 commands 已就绪）
-    if (disposeRegistration) {
-      try { disposeRegistration() } catch { /* ignore */ }
-    }
+     for (const dispose of disposeRegistrations.splice(0).reverse()) {
+       try { dispose() } catch { /* ignore */ }
+     }
     registered = false
   }
 }

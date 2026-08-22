@@ -18,13 +18,13 @@ This plugin brings SillyTavern's World Info into DSH and adds two practical capa
 
 Currently only the PC web UI is developed; mobile UI is not yet adapted.
 
-DeepSeek Harness version: **0.1.0-rc.8**. Other versions are untested.
+DeepSeek Harness version: **0.1.1-rc.2**. Other versions are untested.
 
 ## Key Features
 
 | Feature | Description |
 | --- | --- |
-| 🗂️ SillyTavern-compatible world books | Import/export ST JSON, fully aligned fields and injection semantics, a fairly complete injection system |
+| 🗂️ SillyTavern-compatible world books | Import/export ST JSON with aligned fields and injection semantics, plus a fairly complete injection system |
 | 🤖 World Book Dev Mode | Let the AI write world books itself, with configurable add/delete/edit/query permissions, and control which world book the AI can edit |
 | 🎨 UI Themes | Follow the DSH theme, or use an independent pink theme |
 | 🧩 Integrable | Both the world book management page and the settings card can be embedded into your own plugin |
@@ -134,7 +134,7 @@ The following fields can be imported, edited, exported, and round-tripped, but *
 
 Two additional notes:
 
-- `characterFilter` (entry-level character filtering) **does** have real injection logic: it takes effect only when the host provides a "current character" context (`worldbook.characterContext`, the character-card binding compat layer); without a character context, no filtering is applied and all entries are injected.
+- `characterFilter` (entry-level character filtering) **does** have real injection logic: it takes effect only when a host provides the current character through the generic `worldbook.context` protocol; without character context, no filtering is applied and all entries are injected.
 - For non-@D entries, `position` only affects **injection order** (internal message ordering); unlike ST, content is not placed into different prompt regions (character definition / example messages / author's note, etc.); regular-position entries are all appended at the end of the context.
 
 ---
@@ -147,7 +147,7 @@ If you want more than out-of-the-box usage:
 - **Integrate the world book UI into your own plugin**: world book management page + plugin settings card, wired through DSH slots;
 - **Use only its capabilities**: call the injection engine directly, or read/write world books via the REST API.
 
-See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** for details.
+See **[DEVELOPMENT.md](DEVELOPMENT.md)** for details. AI and developers should read this document first.
 
 ---
 
@@ -171,6 +171,9 @@ The following can be configured in the plugin's "Settings":
 - This is a world book plugin only; there is no "character card" concept, and it cannot be bound to character cards.
 - When enabled alongside other world book plugins, configure carefully; do not enable the same world book in both, or content will be injected twice. Enabling other world book plugins/features simultaneously is not recommended.
 - In Dev Mode, the AI's world book editing scope/permissions are currently **book-level** (managed per world book), and **entry-level** permission control is not implemented.
+- Generic host compatibility is available through the Worldbook Interop Profile documented in `DEVELOPMENT.md` chapter 7. The profile is aligned with SillyTavern World Info semantics, but does not claim to support every ST feature.
+- The optional agent-rp adapter is host-specific and does not define the generic protocol. It is located under `src/compat/agent-rp/` and supports the currently installed `@dsh-external/dsh-agent-rp` `0.0.0-rc.193`.
+- Compatibility Mode is additive: enabling it does not disable global world books. Global enabled books are always injected; Compatibility Mode additionally enables host session books, bindings, and character filtering.
 - No prompt for World Book Dev Mode is pre-configured. When using dev features to develop a world book, it is recommended to configure one first — write your own or import a "world book about writing world books" constraint field usage scenario and provide writing guidance, e.g. "world book entries must be non-recursive", as the prompt.
 - In World Book Dev Mode, the AI's edit scope is constrained by "Dev Mode" and "AI Permissions" — this is a safety design.
 

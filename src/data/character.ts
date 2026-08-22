@@ -21,6 +21,15 @@ export interface WorldbookContext {
   books?: string[]
 }
 
+export interface CharacterBookReference {
+  id: string
+  name: string
+  entryCount: number
+  /** Host-defined source label, such as an embedded character book. */
+  source: string
+  localBookId?: string
+}
+
 export interface WorldbookContextProvider {
   /** 返回某会话的上下文（角色 + 绑定书）；无角色/无法确定时返回 undefined */
   get(sessionId: string): WorldbookContext | undefined

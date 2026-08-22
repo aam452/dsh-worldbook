@@ -202,17 +202,12 @@ export function listEnabled(): WorldbookRow[] {
     .all() as unknown as WorldbookRow[]
 }
 
-// 按书名查找（跨边界引用一律用书名，兼容协议约定）。先精确匹配，再大小写不敏感兜底。
+// 按书名精确查找；跨边界引用区分大小写，不做模糊或大小写兜底。
 export function findByName(name: string): WorldbookRow | null {
   if (typeof name !== 'string' || name.trim() === '') return null
-  const exact = getDb()
+  return (getDb()
     .prepare('SELECT * FROM worldbooks WHERE name=? AND is_deleted=0 LIMIT 1')
-    .get(name) as WorldbookRow | undefined
-  if (exact) return exact
-  const loose = getDb()
-    .prepare('SELECT * FROM worldbooks WHERE name=? COLLATE NOCASE AND is_deleted=0 LIMIT 1')
-    .get(name) as WorldbookRow | undefined
-  return loose ?? null
+    .get(name) as WorldbookRow | undefined) ?? null
 }
 
 // 书名集合 → 命中的世界书（保持去重；不存在的名字静默跳过）。
@@ -367,8 +362,17 @@ export function normalizeEntry(src: Record<string, unknown>): NormalizedEntry {
   const key = strArray(src.key ?? src.keys)
   const keysecondary = strArray(src.keysecondary ?? src.secondary_keys)
   const raw = src.raw as Record<string, unknown> | undefined
-  const delayUntil = src.delayUntilRecursion !== undefined ? src.delayUntilRecursion : (raw?.delayUntilRecursion ?? false)
-  let position = num(src.position, 0) ?? 0
+  const ext = src.extensions as Record<string, unknown> | undefined
+  const value = (name: string, ...fallbacks: string[]) => {
+    for (const key of [name, ...fallbacks]) {
+      if (src[key] !== undefined) return src[key]
+      if (ext?.[key] !== undefined) return ext[key]
+      if (raw?.[key] !== undefined) return raw[key]
+    }
+    return undefined
+  }
+  const delayUntil = value('delayUntilRecursion', 'delay_until_recursion') ?? false
+  let position = num(value('position'), 0) ?? 0
   // 兼容 spec v2 的字符串 position（before_char/after_char）
   if (typeof src.position === 'string') {
     if (src.position === 'after_char') position = 1
@@ -383,21 +387,21 @@ export function normalizeEntry(src: Record<string, unknown>): NormalizedEntry {
     vectorized: bool(src.vectorized) || (raw?.vectorized === true),
     selective: bool(src.selective, false),
     selectiveLogic: num(src.selectiveLogic ?? raw?.selectiveLogic, 0) ?? 0,
-    order: num(src.order ?? src.insertionOrder ?? src.insertion_order ?? raw?.insertion_order, 100) ?? 100,
+    order: num(value('order', 'insertionOrder', 'insertion_order'), 100) ?? 100,
     position,
     disable: src.disable !== undefined ? bool(src.disable) : (src.enabled !== undefined ? !bool(src.enabled) : false),
-    caseSensitive: src.caseSensitive !== undefined ? tri(src.caseSensitive) : null,
-    matchWholeWords: src.matchWholeWords !== undefined ? tri(src.matchWholeWords) : null,
-    scanDepth: num(src.scanDepth),
-    excludeRecursion: bool(src.excludeRecursion, true) || (raw?.excludeRecursion === true),
-    preventRecursion: bool(src.preventRecursion) || (raw?.preventRecursion === true),
-    useProbability: src.useProbability !== undefined ? bool(src.useProbability, true) : true,
-    probability: num(src.probability ?? raw?.probability, 100) ?? 100,
-    depth: num(src.depth ?? raw?.depth, 4) ?? 4,
-    sticky: src.sticky !== undefined ? num(src.sticky, 0) : null,
-    cooldown: src.cooldown !== undefined ? num(src.cooldown, 0) : null,
-    delay: src.delay !== undefined ? num(src.delay, 0) : null,
-    displayIndex: src.displayIndex !== undefined ? num(src.displayIndex, 0) ?? 0 : (raw && (raw.extensions as Record<string, unknown> | undefined)?.display_index !== undefined ? num((raw.extensions as Record<string, unknown>).display_index, 0) ?? 0 : 0),
+    caseSensitive: value('caseSensitive', 'case_sensitive') !== undefined ? tri(value('caseSensitive', 'case_sensitive')) : null,
+    matchWholeWords: value('matchWholeWords', 'match_whole_words') !== undefined ? tri(value('matchWholeWords', 'match_whole_words')) : null,
+    scanDepth: num(value('scanDepth', 'scan_depth')),
+    excludeRecursion: bool(value('excludeRecursion', 'exclude_recursion'), true),
+    preventRecursion: bool(value('preventRecursion', 'prevent_recursion')),
+    useProbability: value('useProbability') !== undefined ? bool(value('useProbability'), true) : true,
+    probability: num(value('probability'), 100) ?? 100,
+    depth: num(value('depth'), 4) ?? 4,
+    sticky: value('sticky') !== undefined ? num(value('sticky'), 0) : null,
+    cooldown: value('cooldown') !== undefined ? num(value('cooldown'), 0) : null,
+    delay: value('delay') !== undefined ? num(value('delay'), 0) : null,
+    displayIndex: src.displayIndex !== undefined ? num(src.displayIndex, 0) ?? 0 : num(ext?.display_index ?? raw?.displayIndex, 0) ?? 0,
   }
 }
 
@@ -541,6 +545,8 @@ export function parseStWorldJson(json: string): {
   name?: string
   description?: string
   scanDepth?: number
+  recursiveScanning?: boolean
+  extensions?: Record<string, unknown>
   entries: Array<Record<string, unknown> & { raw: unknown; key: string[]; keysecondary: string[]; content: string }>
 } {
   let parsed: unknown
@@ -582,6 +588,9 @@ export function parseStWorldJson(json: string): {
     ...(typeof root.name === 'string' ? { name: root.name } : {}),
     ...(typeof root.description === 'string' ? { description: root.description } : {}),
     ...(num(root.scan_depth) !== null ? { scanDepth: num(root.scan_depth) as number } : {}),
+    ...(typeof root.recursive_scanning === 'boolean' ? { recursiveScanning: root.recursive_scanning } : {}),
+    ...(typeof root.extensions === 'object' && root.extensions !== null && !Array.isArray(root.extensions)
+      ? { extensions: root.extensions as Record<string, unknown> } : {}),
     entries: out,
   }
 }
@@ -628,6 +637,9 @@ export function toStWorldJson(bookId: string): string {
   if (book.name) out.name = book.name
   if (book.description) out.description = book.description
   if (book.scan_depth !== null && book.scan_depth !== undefined) out.scan_depth = book.scan_depth
+  const bookExtensions = parseJson<Record<string, unknown>>(book.extensions, {})
+  if (bookExtensions.recursive_scanning !== undefined) out.recursive_scanning = bookExtensions.recursive_scanning
+  if (Object.keys(bookExtensions).length > 0) out.extensions = bookExtensions
   return toJson(out)
 }
 
