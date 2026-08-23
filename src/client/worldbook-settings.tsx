@@ -66,23 +66,22 @@ function mapWork(w: { id?: string; workspaceId?: string; title?: string; path?: 
 
 // 条目多选卡片（memo：on 为布尔原始值，勾选单条目时其它卡片 props 不变，跳过重渲染）
 const EntryCard = memo(function EntryCard({ entry, on, onToggle }: { entry: StWorldEntry; on: boolean; onToggle: (id: string) => void }) {
+  const title = entry.comment || entry.key[0] || '（无标题）'
+  const keywords = entry.key.length > 0 ? entry.key.slice(0, 3).join(' · ') : '无触发词'
   return h('label', {
-    className: 'wb-entry-card' + (on ? ' on' : ''),
-    style: {
-      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', cursor: 'pointer', borderRadius: 10,
-      border: '1px solid ' + (on ? 'var(--ml-pink-4)' : 'var(--ml-line)'),
-      background: on ? 'var(--ml-pink-0)' : 'var(--ml-bg-card-solid)',
-      minWidth: 0,
-    },
+    className: 'wb-entry-card' + (on ? ' on' : '') + (entry.disable ? ' is-disabled' : ''),
+    title: on ? '点击取消选择' : '点击选择条目',
   },
     h('input', {
-      type: 'checkbox', className: 'wb-radio', style: { width: 16, height: 16, flex: 'none' },
+      type: 'checkbox', className: 'wb-entry-checkbox',
       checked: on,
       onChange: () => onToggle(entry.id),
     }),
-    h('div', { style: { flex: 1, minWidth: 0 } },
-      h('div', { style: { fontWeight: 600, fontSize: 13, color: 'var(--ml-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.comment || entry.key.join(', ') || '（无标题）'),
-      h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (entry.content || '').slice(0, 40) || '（空内容）'),
+    h('span', { className: 'wb-entry-checkmark', 'aria-hidden': true }, on ? '✓' : ''),
+    h('div', { className: 'wb-entry-card-copy' },
+      h('div', { className: 'wb-entry-card-title' }, title),
+      h('div', { className: 'wb-entry-card-meta' }, keywords, entry.key.length > 3 ? ` +${entry.key.length - 3}` : null),
+      h('div', { className: 'wb-entry-card-preview' }, (entry.content || '').trim() || '（空内容）'),
     ),
   )
 })
@@ -90,7 +89,7 @@ const EntryCard = memo(function EntryCard({ entry, on, onToggle }: { entry: StWo
 // 世界书插件设置表单：启用开关 + 工作区作用域 + 主题 + 开发模式（含 AI 权限）。
 // variant='dialog'：模态框外壳（世界书页顶部「设置」按钮打开）；
 // variant='card'：内嵌卡片外壳（宿主设置页内嵌，无关闭按钮）。表单逻辑两形态完全一致。
-export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog' }: { workspaces?: WorkspacesService; onClose?: () => void; variant?: 'dialog' | 'card' }) {
+export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog', developerOnly = false, hideDevToggles = false, onDeveloperPointerDown }: { workspaces?: WorkspacesService; onClose?: () => void; variant?: 'dialog' | 'card' | 'developer'; developerOnly?: boolean; hideDevToggles?: boolean; onDeveloperPointerDown?: (event: unknown) => void }) {
   const [loaded, setLoaded] = useState<SettingsRecord | null>(null)
   const [editable, setEditable] = useState<SettingsRecord | null>(null)
   const [saved, setSaved] = useState(false)
@@ -136,11 +135,14 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
 
   const [books, setBooks] = useState<StWorldBook[]>([])
   const [devBookEntries, setDevBookEntries] = useState<StWorldEntry[]>([])
+  const [devEntryTotal, setDevEntryTotal] = useState(0)
+  const [devEntriesLoading, setDevEntriesLoading] = useState(false)
   // 重复注入警告：检测到与本插件连续注入段内重复注入时显示红色横幅（5 秒）
   const [compatAlert, setCompatAlert] = useState<{ plugin: string; sample: string; count: number } | null>(null)
   useEffect(() => {
     let cancelled = false
     let lastKey = ''
+    if (!compatExpanded) return
     const poll = () => {
       api<{ duplicated?: boolean; conflicts?: { plugin: string; sample: string; count: number }[]; checkedAt?: number }>('/compat').then((r) => {
         if (cancelled) return
@@ -155,20 +157,12 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
       }).catch(() => { /* 轮询失败忽略 */ })
     }
     poll()
-    const t = setInterval(poll, 3000)
+    const t = setInterval(poll, 5000)
     return () => { cancelled = true; clearInterval(t) }
-  }, [])
+  }, [compatExpanded])
   useEffect(() => {
     api<StWorldBook[]>('/worldbooks').then(setBooks).catch(() => setBooks([]))
   }, [])
-  useEffect(() => {
-    if (devAction !== 'edit' || !devBookId) { setDevBookEntries([]); return }
-    api<{ total?: number; pageSize?: number; items?: StWorldEntry[] } | StWorldEntry[]>(`/worldbooks/${devBookId}/entries?pageSize=500`).then((r) => {
-      const items = Array.isArray(r) ? r : (r?.items ?? [])
-      setDevBookEntries(items)
-    }).catch(() => setDevBookEntries([]))
-  }, [devAction, devBookId])
-
   // 搜索框 state（世界书 / 条目）
   const [bookSearch, setBookSearch] = useState('')
   const [entrySearch, setEntrySearch] = useState('')
@@ -177,20 +171,29 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
     if (!q) return books
     return books.filter((b) => b.name.toLowerCase().includes(q))
   }, [books, bookSearch])
-  const filteredEntries = useMemo(() => {
-    const q = entrySearch.trim().toLowerCase()
-    if (!q) return devBookEntries
-    return devBookEntries.filter((e) => (e.comment ?? '').toLowerCase().includes(q) || (e.content ?? '').toLowerCase().includes(q) || e.key.join(' ').toLowerCase().includes(q))
-  }, [devBookEntries, entrySearch])
-
-  // 条目分页（前端分页；每页渲染当前页，避免大列表一次性渲染卡顿）
+  // 条目分页由后端完成，前端只渲染当前页。
   const [entryPage, setEntryPage] = useState(1)
   const [entryPageSize, setEntryPageSize] = useState(20)
-  const entryTotalPages = Math.max(1, Math.ceil(filteredEntries.length / entryPageSize))
+  const entryTotalPages = Math.max(1, Math.ceil(devEntryTotal / entryPageSize))
   const currentEntryPage = Math.min(entryPage, entryTotalPages)
-  const pageEntries = useMemo(() => filteredEntries.slice((currentEntryPage - 1) * entryPageSize, currentEntryPage * entryPageSize), [filteredEntries, currentEntryPage, entryPageSize])
   // 切换世界书/搜索词时回到第一页
   useEffect(() => { setEntryPage(1) }, [devBookId, entrySearch])
+  useEffect(() => {
+    if (!devExpanded && !developerOnly) { setDevBookEntries([]); setDevEntryTotal(0); return }
+    if (devAction !== 'edit' || !devBookId) { setDevBookEntries([]); setDevEntryTotal(0); return }
+    setDevEntriesLoading(true)
+    const params = new URLSearchParams({ page: String(currentEntryPage), pageSize: String(entryPageSize) })
+    if (entrySearch.trim()) params.set('q', entrySearch.trim())
+    const controller = new AbortController()
+    api<{ total?: number; items?: StWorldEntry[] }>(`/worldbooks/${devBookId}/entries?${params.toString()}`, { signal: controller.signal }).then((r) => {
+      if (controller.signal.aborted) return
+      setDevBookEntries(r?.items ?? [])
+      setDevEntryTotal(r?.total ?? 0)
+    }).catch(() => { if (!controller.signal.aborted) { setDevBookEntries([]); setDevEntryTotal(0) } }).finally(() => {
+      if (!controller.signal.aborted) setDevEntriesLoading(false)
+    })
+    return () => controller.abort()
+  }, [developerOnly, devExpanded, devAction, devBookId, entrySearch, currentEntryPage, entryPageSize])
 
   function patch(next: Partial<SettingsRecord>) {
     setEditable((prev) => ({ ...(prev ?? loaded ?? settings), ...next }))
@@ -211,8 +214,14 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
     })
   }, [loaded])
 
-  function selectAllEntries() {
-    patch({ devEntryIds: Array.from(new Set([...devEntries, ...filteredEntries.map((e) => e.id)])) })
+  async function selectAllEntries() {
+    if (!devBookId) return
+    try {
+      const result = await api<{ ids?: string[] }>(`/worldbooks/${devBookId}/entries/ids`)
+      patch({ devEntryIds: result.ids ?? [] })
+    } catch (e) {
+      await showAlert({ title: '全选失败', message: (e as Error).message })
+    }
   }
 
   function clearEntries() {
@@ -240,19 +249,19 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
           h('div', { className: 'wb-field-label' }, '允许 AI 编写的条目'),
           h('div', { className: 'wb-entry-tools' },
             h('div', { className: 'wb-entry-actions wb-entry-actions-main' },
-              h('input', { type: 'text', className: 'wb-input wb-entry-search', placeholder: '搜索条目…', value: entrySearch, style: { minHeight: 36 }, onChange: (e: { target: { value: string } }) => setEntrySearch(e.target.value) }),
-              h('button', { className: 'wb-btn', onClick: selectAllEntries }, '全选'),
-              h('button', { className: 'wb-btn', onClick: clearEntries }, '清空'),
-              h('span', { className: 'wb-hint' }, devEntries.length === 0 ? '全部' : `已选 ${devEntries.length}`),
-            ),
-            h('div', { className: 'wb-entry-pages wb-entry-pages-toolbar' },
+              h('input', { type: 'text', className: 'wb-input wb-entry-search wb-entry-search-compact', placeholder: '搜索条目…', value: entrySearch, style: { minHeight: 36 }, onChange: (e: { target: { value: string } }) => setEntrySearch(e.target.value) }),
+              h('div', { className: 'wb-entry-pages wb-entry-pages-inline' },
               h('button', { className: 'wb-btn wb-tool-btn', disabled: currentEntryPage <= 1, onClick: () => setEntryPage((p) => Math.max(1, p - 1)) }, '‹'),
               h('span', { className: 'wb-hint' }, `${currentEntryPage}/${entryTotalPages}`),
               h('select', { className: 'wb-select wb-pagesize-select', value: String(entryPageSize), onChange: (e: { target: { value: string } }) => { setEntryPageSize(Number(e.target.value)); setEntryPage(1) } }, [10, 20, 50].map((n) => h('option', { key: n, value: String(n) }, `${n} 条`))),
               h('button', { className: 'wb-btn wb-tool-btn', disabled: currentEntryPage >= entryTotalPages, onClick: () => setEntryPage((p) => p + 1) }, '›'),
             ),
+              h('button', { className: 'wb-btn', onClick: selectAllEntries }, '全选'),
+              h('button', { className: 'wb-btn', onClick: clearEntries }, '清空'),
+              h('span', { className: 'wb-hint' }, devEntries.length === 0 ? '全部' : `已选 ${devEntries.length}`),
+            ),
           ),
-          h('div', { className: 'wb-entry-grid', style: { display: 'grid', gap: 8, overflowY: 'auto' } }, filteredEntries.length === 0 ? h('div', { className: 'wb-hint' }, '该世界书还没有条目。') : pageEntries.map((e) => h(EntryCard, { key: e.id, entry: e, on: devEntries.includes(e.id), onToggle: toggleDevEntry }))),
+          h('div', { className: 'wb-entry-grid', style: { display: 'grid', gap: 8, overflowY: 'auto' } }, devEntriesLoading ? h('div', { className: 'wb-hint' }, '加载中…') : devBookEntries.length === 0 ? h('div', { className: 'wb-hint' }, '该世界书还没有条目。') : devBookEntries.map((entry) => h(EntryCard, { key: entry.id, entry, on: devEntries.includes(entry.id), onToggle: toggleDevEntry }))),
         ) : null,
       )
     : devModeOn ? h('div', { className: 'wb-hint' }, '新建模式') : null
@@ -291,6 +300,19 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
       await showAlert({ title: '保存失败', message: (e as Error).message })
     }
   }
+
+  const developerSection = (forceExpanded = false, flat = false) => h('section', { className: flat ? 'wb-dev-floating-section' : 'wb-settings-section wb-settings-developer' },
+    h('div', { className: 'wb-settings-section-head' + (forceExpanded ? '' : ' wb-settings-section-toggle'), role: forceExpanded ? undefined : 'button', tabIndex: forceExpanded ? undefined : 0, 'aria-expanded': forceExpanded || devExpanded, onPointerDown: forceExpanded ? onDeveloperPointerDown : undefined, onClick: forceExpanded ? undefined : () => setDevExpanded((value) => !value), onKeyDown: forceExpanded ? undefined : (e: { key: string }) => { if (e.key === 'Enter' || e.key === ' ') setDevExpanded((value) => !value) } }, h('span', { className: 'wb-settings-section-icon' }, '✦'), h('div', null, h('strong', null, '开发模式'), h('span', null, '为 AI 提供受控的世界书编辑能力')), forceExpanded ? null : h('span', { className: 'wb-settings-chevron' + (devExpanded ? ' is-open' : '') }, '⌄')),
+    (forceExpanded || devExpanded) ? h('div', null,
+      hideDevToggles ? null : h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '开发模式'), h('div', { className: 'wb-hint' }, '仅在需要 AI 编辑世界书时开启')), h('div', { className: 'wb-switch' + (devModeOn ? '' : ' off'), onClick: () => patch({ devMode: !devModeOn }) })),
+      devModeOn ? h('div', { className: 'wb-dev-controls' },
+        hideDevToggles ? null : h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '悬浮窗')), h('div', { className: 'wb-switch' + (settings.devFloating ? '' : ' off'), onClick: () => patch({ devFloating: !settings.devFloating }) })),
+        permBlock(),
+        h('div', { className: 'wb-setting-field' }, h('div', { className: 'wb-field-label' }, '编辑方式'), h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (devAction === 'create' ? ' active' : ''), onClick: () => patch({ devAction: 'create' }) }, '新建'), h('button', { className: 'wb-btn' + (devAction === 'edit' ? ' active' : ''), onClick: () => patch({ devAction: 'edit' }) }, '编辑'))),
+      ) : null,
+      devTargetView,
+    ) : null,
+  )
 
   // 设置表单内容体（弹窗与内嵌卡片共用）
   const renderBody = () => h('div', null,
@@ -334,22 +356,18 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
             h('div', { className: 'wb-setting-row' + (!compatOn ? ' is-disabled' : '') }, h('div', null, h('div', { className: 'wb-name' }, 'agent-rp 兼容调试日志')), h('div', { className: 'wb-switch' + (agentRpDebugOn ? '' : ' off'), onClick: () => compatOn && patch({ agentRpDebug: !agentRpDebugOn }) })),
           ) : null,
         ),
-        h('section', { className: 'wb-settings-section wb-settings-developer' },
-          h('div', { className: 'wb-settings-section-head wb-settings-section-toggle', role: 'button', tabIndex: 0, 'aria-expanded': devExpanded, onClick: () => setDevExpanded((value) => !value), onKeyDown: (e: { key: string }) => { if (e.key === 'Enter' || e.key === ' ') setDevExpanded((value) => !value) } }, h('span', { className: 'wb-settings-section-icon' }, '✦'), h('div', null, h('strong', null, '开发模式'), h('span', null, '为 AI 提供受控的世界书编辑能力')), h('span', { className: 'wb-settings-chevron' + (devExpanded ? ' is-open' : '') }, '⌄')),
-          devExpanded ? h('div', null,
-            h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '开发模式'), h('div', { className: 'wb-hint' }, '仅在需要 AI 编辑世界书时开启')), h('div', { className: 'wb-switch' + (devModeOn ? '' : ' off'), onClick: () => patch({ devMode: !devModeOn }) })),
-            devModeOn ? h('div', { className: 'wb-dev-controls' },
-              h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '悬浮窗')), h('div', { className: 'wb-switch' + (settings.devFloating ? '' : ' off'), onClick: () => patch({ devFloating: !settings.devFloating }) })),
-              permBlock(),
-              h('div', { className: 'wb-setting-field' }, h('div', { className: 'wb-field-label' }, '编辑方式'), h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (devAction === 'create' ? ' active' : ''), onClick: () => patch({ devAction: 'create' }) }, '新建'), h('button', { className: 'wb-btn' + (devAction === 'edit' ? ' active' : ''), onClick: () => patch({ devAction: 'edit' }) }, '编辑'))),
-            ) : null,
-            devTargetView,
-          ) : null,
-        ),
+        developerSection(),
       ),
       h('div', { className: 'wb-settings-footer' }, h('span', { className: 'wb-hint' }, saved ? '设置已保存' : '修改后点击保存即可生效'), h('button', { className: 'wb-btn primary', onClick: save }, saved ? '已保存 ✓' : '保存设置')),
     ),
   )
+
+  if (developerOnly || variant === 'developer') {
+    return h('div', { className: 'wb-dev-floating-settings' },
+      developerSection(true, true),
+      h('div', { className: 'wb-settings-footer' }, h('span', { className: 'wb-hint' }, saved ? '设置已保存' : '修改后点击保存即可生效'), h('button', { className: 'wb-btn primary', onClick: save }, saved ? '已保存 ✓' : '保存设置')),
+    )
+  }
 
   if (variant === 'card') {
     return h('div', { className: 'wb-card', style: { width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' } },

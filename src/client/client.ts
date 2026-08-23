@@ -13,9 +13,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createElement as h } from 'react'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
+import { useRef } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import './slots.ts'
 import { WorldbooksPage } from './worldbook-page.tsx'
 import { WorldbookSettingsDialog } from './worldbook-settings.tsx'
+import { api } from './api'
 import { ConfirmHost } from './wb-confirm.tsx'
 import type { WorkspacesService, SessionsService } from './worldbook-settings.tsx'
 import { readThemeCache, writeThemeCache, type WorldbookTheme } from './wb-theme.ts'
@@ -40,6 +43,143 @@ interface SlotsService {
   register(options: { name: string; id?: string; order?: number; label?: string; priority?: number; children?: Record<string, unknown> }, component: unknown): () => void
   entriesOfSlot?(key: string): unknown[]
   subscribe?(key: string, fn: () => void): () => void
+}
+
+interface FloatingSettings {
+  devMode?: boolean
+  devFloating?: boolean
+}
+
+const FLOATING_POSITION_KEY = 'dsh-worldbook-dev-floating-position'
+
+function readFloatingPosition(): { leftPct: number; topPct: number } {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) ?? 'null') as { leftPct?: number; topPct?: number } | null
+    if (parsed && typeof parsed.leftPct === 'number' && typeof parsed.topPct === 'number') {
+      return { leftPct: Math.min(100, Math.max(0, parsed.leftPct)), topPct: Math.min(100, Math.max(0, parsed.topPct)) }
+    }
+  } catch { /* 本地存储不可用时使用默认位置 */ }
+  return { leftPct: 92, topPct: 76 }
+}
+
+function WorldbookDevFloating({ workspaces, sessions }: { workspaces?: WorkspacesService; sessions?: SessionsService }) {
+  const [settings, setSettings] = useState<FloatingSettings | null>(null)
+  const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState(readFloatingPosition)
+  const windowOffset = useRef({ x: 0, y: 0 })
+  const dragged = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = () => api<FloatingSettings>('/settings').then((value) => { if (alive) setSettings(value) }).catch(() => {})
+    load()
+    window.addEventListener('dsh-worldbook-data-changed', load)
+    return () => { alive = false; window.removeEventListener('dsh-worldbook-data-changed', load) }
+  }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify(position)) } catch { /* 本地存储不可用时忽略 */ }
+  }, [position])
+
+  if (!settings?.devMode || !settings.devFloating) return null
+
+  function onPointerDown(e: { button: number; clientX: number; clientY: number; currentTarget: HTMLButtonElement; pointerId: number; preventDefault: () => void }) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const button = e.currentTarget
+    const startX = e.clientX
+    const startY = e.clientY
+    const startPosition = position
+    let moved = false
+    button.setPointerCapture(e.pointerId)
+    const move = (event: PointerEvent) => {
+      const dx = event.clientX - startX
+      const dy = event.clientY - startY
+      if (!moved && Math.hypot(dx, dy) > 5) moved = true
+      if (moved) {
+        setPosition({
+          leftPct: Math.min(100, Math.max(0, startPosition.leftPct + dx / window.innerWidth * 100)),
+          topPct: Math.min(100, Math.max(0, startPosition.topPct + dy / window.innerHeight * 100)),
+        })
+      }
+    }
+    const end = () => {
+      button.removeEventListener('pointermove', move)
+      button.removeEventListener('pointerup', end)
+      button.removeEventListener('pointercancel', end)
+      try { button.releasePointerCapture(e.pointerId) } catch { /* 指针已释放 */ }
+      dragged.current = moved
+      window.setTimeout(() => { dragged.current = false }, 0)
+    }
+    button.addEventListener('pointermove', move)
+    button.addEventListener('pointerup', end)
+    button.addEventListener('pointercancel', end)
+  }
+
+  function onWindowPointerDown(e: { button: number; clientX: number; clientY: number; currentTarget: HTMLDivElement; pointerId: number; preventDefault: () => void }) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const header = e.currentTarget
+    let windowEl = header.parentElement
+    while (windowEl && !windowEl.classList.contains('wb-dev-floating-window')) windowEl = windowEl.parentElement
+    if (!windowEl) return
+    const rect = windowEl.getBoundingClientRect()
+    const startX = e.clientX
+    const startY = e.clientY
+    const centeredLeft = (window.innerWidth - rect.width) / 2
+    const centeredTop = (window.innerHeight - rect.height) / 2
+    const startOffset = {
+      x: rect.left - centeredLeft,
+      y: rect.top - centeredTop,
+    }
+    let moved = false
+    let finalOffset = startOffset
+    header.setPointerCapture(e.pointerId)
+    windowEl.style.willChange = 'transform'
+    const move = (event: PointerEvent) => {
+      const dx = event.clientX - startX
+      const dy = event.clientY - startY
+      if (!moved && Math.hypot(dx, dy) > 4) moved = true
+      if (moved) {
+        const nextLeft = centeredLeft + startOffset.x + dx
+        const nextTop = centeredTop + startOffset.y + dy
+        const left = Math.min(Math.max(0, nextLeft), Math.max(0, window.innerWidth - rect.width))
+        const top = Math.min(Math.max(0, nextTop), Math.max(0, window.innerHeight - rect.height))
+        finalOffset = { x: left - centeredLeft, y: top - centeredTop }
+        windowEl.style.transform = `translate3d(calc(-50% + ${finalOffset.x}px), calc(-50% + ${finalOffset.y}px), 0)`
+      }
+    }
+    const end = () => {
+      header.removeEventListener('pointermove', move)
+      header.removeEventListener('pointerup', end)
+      header.removeEventListener('pointercancel', end)
+      try { header.releasePointerCapture(e.pointerId) } catch { /* 指针已释放 */ }
+      if (moved) {
+        windowOffset.current = finalOffset
+      }
+      windowEl.style.willChange = 'auto'
+    }
+    header.addEventListener('pointermove', move)
+    header.addEventListener('pointerup', end)
+    header.addEventListener('pointercancel', end)
+  }
+
+  return h('div', { className: 'wb-dev-floating-root' },
+    h('button', {
+      className: 'wb-dev-floating-button',
+      title: '打开世界书开发窗口',
+      'aria-label': '打开世界书开发窗口',
+      style: { left: `${position.leftPct}%`, top: `${position.topPct}%` },
+      onPointerDown,
+      onClick: () => { if (!dragged.current) setOpen(true) },
+    }, h('span', { className: 'wb-dev-floating-glyph' }, '✦'), h('span', { className: 'wb-dev-floating-label' }, '世界书')),
+    open ? h('div', { className: 'wb-dev-floating-backdrop', onClick: () => setOpen(false) },
+        h('div', { className: 'wb-dev-floating-window', role: 'dialog', 'aria-label': '开发模式设置', style: { transform: `translate3d(calc(-50% + ${windowOffset.current.x}px), calc(-50% + ${windowOffset.current.y}px), 0)` }, onClick: (e: { stopPropagation: () => void }) => e.stopPropagation() },
+        h('button', { className: 'wb-btn wb-dev-floating-close', onPointerDown: (e: { stopPropagation: () => void }) => e.stopPropagation(), onClick: () => setOpen(false), title: '关闭' }, '×'),
+        h('div', { className: 'wb-dev-floating-window-body' }, h(WorldbookSettingsDialog, { workspaces, variant: 'developer', developerOnly: true, hideDevToggles: true, onDeveloperPointerDown: (event: unknown) => onWindowPointerDown(event as Parameters<typeof onWindowPointerDown>[0]) })),
+      ),
+    ) : null,
+  )
 }
 
 function WithRoot({ children, sessions, workspaces }: { children?: ReactNode; sessions?: SessionsService; workspaces?: WorkspacesService }) {
@@ -85,6 +225,20 @@ export function apply(ctx: ClientContext) {
 
   const workspaces = ctx.workspaces as unknown as WorkspacesService | undefined
   const sessions = ctx.sessions as unknown as SessionsService | undefined
+
+  // 独立挂载到 DSH 主页面 body，不跟随世界书管理页 slot 一起出现或消失。
+  // 参考 MindLink 的 FAB 挂载方式：页面级悬浮入口必须脱离具体业务页面容器。
+  ctx.effect(() => {
+    const host = document.createElement('div')
+    host.setAttribute('data-dsh-worldbook-floating', '')
+    document.body.appendChild(host)
+    const root: Root = createRoot(host)
+    root.render(h(WithRoot, { workspaces, sessions }, h(WorldbookDevFloating, { workspaces, sessions })))
+    return () => {
+      root.unmount()
+      host.remove()
+    }
+  }, 'dsh-worldbook: dev floating')
 
   // 注册本插件 UI 文案词典（中英），供 label 等随语言切换动态读取。
   ctx.effect(

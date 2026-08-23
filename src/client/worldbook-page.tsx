@@ -1,5 +1,5 @@
 import { createElement as h } from 'react'
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import type { ReactNode, PointerEvent as RPointerEvent } from 'react'
 import { api, changed, onChanged } from './api'
 import type { ApiErr } from './api'
@@ -534,6 +534,52 @@ function blankEntry(): StWorldEntry {
   }
 }
 
+const WorldbookEntryRow = memo(function WorldbookEntryRow(props: {
+  entry: StWorldEntry
+  dragging: boolean
+  sortable: boolean
+  onOpen: (entry: StWorldEntry) => void
+  onToggle: (entry: StWorldEntry) => void
+  onDelete: (id: string) => void
+  onDragStart: (id: string, event: unknown) => void
+  onDragEnd: () => void
+  onDragOver: (event: unknown) => void
+  onDrop: (id: string, event: unknown) => void
+}) {
+  const en = props.entry
+  const stateName = (e: StWorldEntry) => (e.constant ? '🔵常驻' : e.vectorized ? '🔗向量' : e.disable ? '禁用' : '🟢普通')
+  return h('div', {
+    className: 'wb-row' + (props.dragging ? ' wb-row-dragging' : ''),
+    style: { padding: '8px 12px' },
+    draggable: false,
+  },
+    props.sortable
+      ? h('span', {
+        className: 'wbed-grip' + (props.dragging ? ' active' : ''),
+        draggable: true, title: '拖动调整自定义顺序',
+        onDragStart: (e: unknown) => props.onDragStart(en.id, e),
+        onDragEnd: props.onDragEnd,
+        onDragOver: props.onDragOver,
+        onDrop: (e: unknown) => props.onDrop(en.id, e),
+      }, '⋮⋮')
+      : null,
+    h('div', { style: { flex: 1, minWidth: 0, cursor: 'pointer' }, onClick: () => props.onOpen(en) },
+      h('div', { className: 'wb-name' }, en.comment || '（无标题）'),
+      h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } },
+        `${stateName(en)} · 顺序 ${en.order} · ${en.key.length ? en.key.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
+    ),
+    h('button', {
+      className: 'wb-btn' + (!en.disable ? '' : ' muted'),
+      style: !en.disable
+        ? { color: 'var(--dsw-alias-state-success-primary)', borderColor: 'var(--dsw-alias-state-success-tertiary)', background: 'var(--dsw-alias-state-success-tertiary)' }
+        : { color: 'var(--ml-ink-3)', borderColor: 'var(--ml-line)' },
+      title: '点击切换启用/停用', onClick: () => props.onToggle(en),
+    }, !en.disable ? '✓ 已启用' : '○ 未启用'),
+    h('button', { className: 'wb-btn', onClick: () => props.onOpen(en) }, '编辑'),
+    h('button', { className: 'wb-btn danger', onClick: () => props.onDelete(en.id) }, '删除'),
+  )
+})
+
 function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
   const [name, setName] = useState(props.book.name)
   const [entries, setEntries] = useState<StWorldEntry[] | null>(null)
@@ -542,6 +588,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
   const [msg, setMsg] = useState('')
   const [editingEntry, setEditingEntry] = useState<StWorldEntry | null>(null)
   const [isNew, setIsNew] = useState(false)
+  const [searchInput, setSearchInput] = useState('')
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState('custom')
   const [sortOrder, setSortOrder] = useState('asc')
@@ -551,6 +598,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
   const contentRef = useRef<HTMLTextAreaElement | null>(null)
   const renameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const entriesRequest = useRef<AbortController | null>(null)
 
   useEffect(() => { setName(props.book.name) }, [props.book.name])
 
@@ -570,25 +618,37 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
     params.set('order', sortOrder)
     params.set('page', String(page))
     params.set('pageSize', String(pageSize))
-    api<{ total?: number; pageSize?: number; items?: StWorldEntry[] } | StWorldEntry[]>(`/worldbooks/${props.book.id}/entries?${params.toString()}`)
+    entriesRequest.current?.abort()
+    const controller = new AbortController()
+    entriesRequest.current = controller
+    api<{ total?: number; pageSize?: number; items?: StWorldEntry[] } | StWorldEntry[]>(`/worldbooks/${props.book.id}/entries?${params.toString()}`, { signal: controller.signal })
       .then((data) => {
+        if (controller.signal.aborted) return
         // 兼容旧格式：后端直接返回条目数组
         if (Array.isArray(data)) { setEntries(data); setTotal(data.length); return }
         setEntries(data?.items ?? [])
         setTotal(data?.total ?? (data?.items?.length ?? 0))
       })
-      .catch((e) => { setEntries([]); setMsg('加载条目失败：' + (e as Error).message) })
-      .finally(() => setEntriesLoading(false))
+      .catch((e) => {
+        if (!controller.signal.aborted) { setEntries([]); setMsg('加载条目失败：' + (e as Error).message) }
+      })
+      .finally(() => { if (!controller.signal.aborted) setEntriesLoading(false) })
   }, [props.book.id, query, sortKey, sortOrder, page, pageSize])
 
   useEffect(() => { setMsg(''); reloadEntries() }, [reloadEntries])
 
-  useEffect(() => () => { if (searchTimer.current) clearTimeout(searchTimer.current) }, [])
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    entriesRequest.current?.abort()
+  }, [])
 
   function onSearch(next: string) {
-    setQuery(next)
+    setSearchInput(next)
     if (searchTimer.current) clearTimeout(searchTimer.current)
-    searchTimer.current = setTimeout(() => setPage(1), 300)
+    searchTimer.current = setTimeout(() => {
+      setQuery(next)
+      setPage(1)
+    }, 300)
   }
 
   function onSort(key: string) {
@@ -601,7 +661,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
     setPage(1)
   }
 
-  async function doReorder(dragId: string, targetId: string) {
+  const doReorder = useCallback(async (dragId: string, targetId: string) => {
     if (dragId === targetId || !entries) return
     const from = entries.findIndex((e) => e.id === dragId)
     const to = entries.findIndex((e) => e.id === targetId)
@@ -617,7 +677,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
     } catch (e) {
       setMsg('排序失败：' + (e as Error).message)
     }
-  }
+  }, [entries, props.book.id, reloadEntries])
 
   function patchEntry(patch: Partial<StWorldEntry>) {
     setEditingEntry((prev) => (prev ? { ...prev, ...patch } : prev))
@@ -639,7 +699,7 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
     }
   }
 
-  async function deleteEntry(id: string) {
+  const deleteEntry = useCallback(async (id: string) => {
     const ok = await showConfirm({ title: '删除条目', message: '确定删除这条条目？', danger: true, confirmText: '删除' })
     if (!ok) return
     try {
@@ -648,18 +708,26 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
     } catch (e) {
       setMsg('删除失败：' + (e as Error).message)
     }
-  }
+  }, [props.book.id, reloadEntries])
 
-  async function toggleEntryEnabled(en: StWorldEntry) {
+  const toggleEntryEnabled = useCallback(async (en: StWorldEntry) => {
     try {
       await api(`/worldbooks/${props.book.id}/entries/${en.id}`, { method: 'PUT', body: JSON.stringify({ disable: !en.disable }) })
       changed(); reloadEntries()
     } catch (e) {
       setMsg('操作失败：' + (e as Error).message)
     }
-  }
+  }, [props.book.id, reloadEntries])
 
-  const stateName = (e: StWorldEntry) => (e.constant ? '🔵常驻' : e.vectorized ? '🔗向量' : e.disable ? '禁用' : '🟢普通')
+  const openEntry = useCallback((entry: StWorldEntry) => { setEditingEntry({ ...entry }); setIsNew(false) }, [])
+  const handleDragStart = useCallback((id: string, event: unknown) => { setDragging(id); (event as { dataTransfer: DataTransfer }).dataTransfer.effectAllowed = 'move' }, [])
+  const handleDragEnd = useCallback(() => setDragging(null), [])
+  const handleDragOver = useCallback((event: unknown) => (event as { preventDefault: () => void }).preventDefault(), [])
+  const handleDrop = useCallback((targetId: string, event: unknown) => {
+    const e = event as { preventDefault: () => void }
+    e.preventDefault()
+    if (dragging) void doReorder(dragging, targetId)
+  }, [dragging, doReorder])
 
   return h('div', { className: 'wb-card', style: { maxHeight: 560, display: 'flex', flexDirection: 'column' } },
     h('div', { className: 'wb-card-hd' },
@@ -673,12 +741,10 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
         h('label', { className: 'wb-field-label' }, '世界书名称'),
         h('input', { className: 'wb-input wb-name-input', style: { width: '100%' }, value: name, onChange: (e) => rename(e.target.value) }),
       ),
-      // 搜索 + 排序 + 方向 + 分页 + 新增条目（一行，间距统一 8px）
-      h('div', { className: 'wb-actions', style: { justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 8, columnGap: 10, alignItems: 'center' } },
-        h('div', { className: 'wb-actions', style: { gap: 8, flex: 1, minWidth: 0, alignItems: 'center' } },
+      h('div', { className: 'wb-editor-toolbar' },
+        h('div', { className: 'wb-editor-toolbar-main' },
           h('input', {
-            className: 'wb-input wb-tool-input', placeholder: '搜索…', value: query,
-            style: { width: 132, flex: 'none', fontSize: 13 },
+            className: 'wb-input wb-tool-input wb-editor-search', placeholder: '搜索条目…', value: searchInput,
             onChange: (e) => onSearch(e.target.value),
           }),
           h('select', {
@@ -694,63 +760,45 @@ function WorldbookEditor(props: { book: StWorldBook; onChange: () => void }) {
             }, sortOrder === 'asc' ? '↑' : '↓')
             : null,
         ),
-        // 分页：上一页 / 第 x/y 页 / 每页条数下拉 / 下一页
-        h('div', { className: 'wb-actions', style: { gap: 8, alignItems: 'center' } },
-          h('button', { className: 'wb-btn wb-tool-btn wb-pager-btn', disabled: page <= 1, onClick: () => setPage((p) => Math.max(1, p - 1)) }, '‹  上一页'),
-          h('span', { className: 'wb-hint', style: { whiteSpace: 'nowrap', fontSize: 12 } }, `第 ${page}/${Math.max(1, Math.ceil(total / pageSize))} 页`),
+        h('div', { className: 'wb-editor-toolbar-actions' },
+          h('button', { className: 'wb-btn primary wb-add-entry-btn', onClick: () => { setEditingEntry(blankEntry()); setIsNew(true) } }, '＋ 新增条目'),
+        ),
+      ),
+      h('div', { className: 'wb-editor-list-meta' },
+        h('div', { className: 'wb-editor-list-summary' },
+          h('span', null, `共 ${total} 条目${query.trim() ? ' · 搜索结果' : ''}`),
+          sortKey === 'custom' ? h('span', null, '可拖动 ⋮⋮ 调整顺序') : null,
+        ),
+        h('div', { className: 'wb-editor-pager' },
+          h('button', { className: 'wb-btn wb-tool-btn', title: '上一页', disabled: page <= 1, onClick: () => setPage((p) => Math.max(1, p - 1)) }, '‹'),
+          h('span', { className: 'wb-editor-page-label' }, `${page} / ${Math.max(1, Math.ceil(total / pageSize))}`),
           h('select', {
             className: 'wb-select wb-pagesize-select', value: String(pageSize), title: '每页条数',
             onChange: (e: { target: { value: string } }) => { setPageSize(Number(e.target.value)); setPage(1) },
           },
             [10, 20, 50].map((n) => h('option', { key: n, value: String(n) }, `${n} 条`)),
           ),
-          h('button', { className: 'wb-btn wb-tool-btn wb-pager-btn', disabled: page >= Math.ceil(total / pageSize), onClick: () => setPage((p) => p + 1) }, '下一页  ›'),
+          h('button', { className: 'wb-btn wb-tool-btn', title: '下一页', disabled: page >= Math.ceil(total / pageSize), onClick: () => setPage((p) => p + 1) }, '›'),
         ),
-        h('button', { className: 'wb-btn primary', style: { flex: 'none' }, onClick: () => { setEditingEntry(blankEntry()); setIsNew(true) } }, '＋ 新增条目'),
-      ),
-      h('div', { className: 'wb-actions', style: { justifyContent: 'space-between' } },
-        h('div', { className: 'wb-hint', style: { fontWeight: 700, color: 'var(--ml-pink-6)' } }, `条目 · ${total}${query.trim() ? '（含搜索）' : ''}${sortKey === 'custom' ? ' · 可拖动 ⋮⋮ 调整自定义顺序' : ''}`),
       ),
       h('div', { className: 'wb-entries' + (entriesLoading ? ' wb-entries-loading' : '') },
         entries === null
           ? h('div', { className: 'wb-hint' }, '加载中…')
           : !entries || entries.length === 0
             ? h('div', { className: 'wb-hint' }, '暂无条目，点「＋ 新增条目」创建，或对书本「导入」ST JSON / 角色卡。')
-            : entries.map((en) =>
-              h('div', {
-                key: en.id,
-                className: 'wb-row' + (dragging === en.id ? ' wb-row-dragging' : ''),
-                style: { padding: '8px 12px' },
-                draggable: false,
-              },
-                // 自定义排序：仅三条杠可拖（避免与滚动/点击冲突）
-                sortKey === 'custom'
-                  ? h('span', {
-                    className: 'wbed-grip' + (dragging === en.id ? ' active' : ''),
-                    draggable: true, title: '拖动调整自定义顺序',
-                    onDragStart: (e) => { setDragging(en.id); (e as unknown as { dataTransfer: DataTransfer }).dataTransfer.effectAllowed = 'move' },
-                    onDragEnd: () => setDragging(null),
-                    onDragOver: (e) => e.preventDefault(),
-                    onDrop: (e) => { e.preventDefault(); if (dragging) doReorder(dragging, en.id) },
-                  }, '⋮⋮')
-                  : null,
-                h('div', { style: { flex: 1, minWidth: 0, cursor: 'pointer' }, onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } },
-                  h('div', { className: 'wb-name' }, (en.comment || '（无标题）')),
-                  h('div', { className: 'wb-meta', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } },
-                    `${stateName(en)} · 顺序 ${en.order} · ${en.key.length ? en.key.join('、') : '无触发词'} · ${en.content.slice(0, 60)}`),
-                ),
-                h('button', {
-                  className: 'wb-btn' + (!en.disable ? '' : ' muted'),
-                  style: !en.disable
-                    ? { color: 'var(--dsw-alias-state-success-primary)', borderColor: 'var(--dsw-alias-state-success-tertiary)', background: 'var(--dsw-alias-state-success-tertiary)' }
-                    : { color: 'var(--ml-ink-3)', borderColor: 'var(--ml-line)' },
-                  title: '点击切换启用/停用',
-                  onClick: () => toggleEntryEnabled(en),
-                }, !en.disable ? '✓ 已启用' : '○ 未启用'),
-                h('button', { className: 'wb-btn', onClick: () => { setEditingEntry({ ...en }); setIsNew(false) } }, '编辑'),
-                h('button', { className: 'wb-btn danger', onClick: () => deleteEntry(en.id) }, '删除'),
-              ),
-            ),
+             : entries.map((en) => h(WorldbookEntryRow, {
+               key: en.id,
+               entry: en,
+               dragging: dragging === en.id,
+               sortable: sortKey === 'custom',
+               onOpen: openEntry,
+               onToggle: toggleEntryEnabled,
+               onDelete: deleteEntry,
+               onDragStart: handleDragStart,
+               onDragEnd: handleDragEnd,
+               onDragOver: handleDragOver,
+               onDrop: handleDrop,
+             })),
       ),
     ),
     editingEntry ? h(EntryEditorModal, {

@@ -279,6 +279,52 @@ export function entries(bookId: string): WorldbookEntryRow[] {
     .all(bookId) as unknown as WorldbookEntryRow[]
 }
 
+export interface EntryPageOptions {
+  query?: string
+  sort?: string
+  order?: string
+  page: number
+  pageSize: number
+}
+
+export function entryPage(bookId: string, options: EntryPageOptions): { total: number; rows: WorldbookEntryRow[] } {
+  const db = getDb()
+  const q = options.query?.trim() ?? ''
+  const pattern = `%${q.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`
+  const where = q
+    ? `AND (LOWER(COALESCE(comment, '')) LIKE ? ESCAPE '\\'
+        OR LOWER(content) LIKE ? ESCAPE '\\'
+        OR LOWER(key) LIKE ? ESCAPE '\\'
+        OR LOWER(keysecondary) LIKE ? ESCAPE '\\'
+        OR LOWER(COALESCE(raw, '')) LIKE ? ESCAPE '\\')`
+    : ''
+  const params = q ? [bookId, pattern, pattern, pattern, pattern, pattern] : [bookId]
+  const total = Number((db.prepare(`SELECT COUNT(*) AS total FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0 ${where}`).get(...params) as { total: number }).total)
+  const direction = options.order === 'desc' ? 'DESC' : 'ASC'
+  const sortSql: Record<string, string> = {
+    custom: 'displayIndex',
+    comment: "LOWER(COALESCE(comment, ''))",
+    content: 'LENGTH(content)',
+    depth: 'depth',
+    order: '"order"',
+    uid: 'rowid',
+    probability: 'probability',
+    priority: 'CASE WHEN constant=1 THEN 0 WHEN disable=1 THEN 2 ELSE 1 END',
+  }
+  const sort = sortSql[options.sort ?? 'custom'] ?? sortSql.custom
+  const offset = Math.max(0, (options.page - 1) * options.pageSize)
+  const rows = db.prepare(
+    `SELECT * FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0 ${where}
+     ORDER BY ${sort} ${direction}, displayIndex ASC, "order" DESC LIMIT ? OFFSET ?`,
+  ).all(...params, options.pageSize, offset) as unknown as WorldbookEntryRow[]
+  return { total, rows }
+}
+
+export function entryIds(bookId: string): string[] {
+  const rows = getDb().prepare('SELECT id FROM worldbook_entries WHERE worldbook_id=? AND is_deleted=0 ORDER BY displayIndex ASC, "order" DESC').all(bookId) as { id: string }[]
+  return rows.map((row) => row.id)
+}
+
 // 替换整本条目集（导入用）：删旧插新。
 export function replaceEntries(bookId: string, items: Array<Record<string, unknown>>): void {
   const db = getDb()
