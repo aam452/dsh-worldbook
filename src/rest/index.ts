@@ -55,9 +55,10 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
 
   if (seg[0] === 'character-books' && method === 'GET') {
     if (!setting.compatEnabled()) return ok(res, [])
+    const requestedSessionId = new URL(req.url ?? '/', 'http://x').searchParams.get('sessionId') ?? undefined
     let provider: WorldbookCharacterBooks | undefined
     try { provider = ctx.get(WORLDBOOK_CHARACTER_BOOKS_KEY) as WorldbookCharacterBooks | undefined } catch { provider = undefined }
-    try { return ok(res, typeof provider?.list === 'function' ? provider.list() : []) } catch { return ok(res, []) }
+    try { return ok(res, typeof provider?.list === 'function' && requestedSessionId !== undefined ? provider.list(requestedSessionId) : []) } catch { return ok(res, []) }
   }
 
   // 世界书（全局共享，不绑会话；作用域随插件工作区生效范围）
@@ -209,53 +210,24 @@ async function route(ctx: Context, req: IncomingMessage, res: ServerResponse): P
     if (method === 'GET') return ok(res, settingAll())
     if (method === 'PUT') {
       const body = (await readJson(req)) ?? {}
-      for (const [key, value] of Object.entries(body)) {
-        if (key === 'enabled') setting.setEnabled(value === true || value === 'true')
-        else if (key === 'workspaceMode') setting.setWorkspaceScope(value === 'selected' ? 'selected' : 'all', setting.workspaceIds())
-        else if (key === 'workspaceIds') setting.setWorkspaceScope(setting.workspaceMode(), Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') : [])
-        else if (key === 'theme') setting.setTheme(typeof value === 'string' ? value : 'dsh')
-        else if (key === 'injectMode') setting.setInjectMode(value === 'per-turn' ? 'per-turn' : 'every-step')
-        else if (key === 'devMode') setting.setDevMode(value === true || value === 'true')
-        else if (key === 'devAction') setting.setDevAction(value === 'edit' ? 'edit' : 'create')
-        else if (key === 'devBookId') setting.setDevBookId(typeof value === 'string' ? value : '')
-        else if (key === 'devEntryIds') setting.setDevEntryIds(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') : [])
-        else if (key === 'devPerms') setting.setDevPerms(Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === 'string') as setting.DevPerm[] : [])
-        else if (key === 'compatEnabled') setting.setCompatEnabled(value === true || value === 'true')
-        else if (key === 'exposeOperations') setting.setExposeOperations(value === true || value === 'true')
-        else if (key === 'agentRpCompat') setting.setAgentRpCompat(value === true || value === 'true')
-        else if (key === 'agentRpDebug') setting.setAgentRpDebug(value === true || value === 'true')
-      }
+      const current = setting.settings()
+      const next = { ...current, ...body } as setting.SettingsDocument
+      const saved = setting.saveSettings(next)
       // 开发模式开关变化时同步工具注册（开则暴露 schema，关则注销）
       syncDevTool(ctx)
       // 操作接口开关变化时同步服务注册（开则 provide，关则注销）
       syncOperations(ctx)
       // agent-rp 兼容开关变化时同步挂载/卸载适配
       syncAgentRpCompat(ctx)
-      return ok(res, settingAll())
+      return ok(res, saved)
     }
   }
 
   notFound(res, '未找到路由: ' + pathname)
 }
 
-function settingAll(): Record<string, string> {
-  const s = setting.getAll()
-  return {
-    enabled: setting.enabled() ? 'true' : 'false',
-    workspaceMode: setting.workspaceMode(),
-    workspaceIds: s.workspaceIds ?? '[]',
-    theme: setting.theme(),
-    injectMode: setting.injectMode(),
-    devMode: setting.devMode() ? 'true' : 'false',
-    devAction: setting.devAction(),
-    devBookId: setting.devBookId(),
-    devEntryIds: JSON.stringify(setting.devEntryIds()),
-    devPerms: JSON.stringify(setting.devPerms()),
-    compatEnabled: setting.compatEnabled() ? 'true' : 'false',
-    exposeOperations: setting.exposeOperations() ? 'true' : 'false',
-    agentRpCompat: setting.agentRpCompat() ? 'true' : 'false',
-    agentRpDebug: setting.agentRpDebug() ? 'true' : 'false',
-  }
+function settingAll(): setting.SettingsDocument {
+  return setting.settings()
 }
 
 // ── 辅助 ────────────────────────────────────────────────────────────────

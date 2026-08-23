@@ -17,21 +17,29 @@ export interface WorkspacesService {
   }
 }
 
+export interface SessionsService {
+  list?: {
+    getSnapshot(): { current?: string }
+    subscribe(fn: () => void): () => void
+  }
+}
+
 interface SettingsRecord {
-  enabled: string
-  workspaceMode: string
-  workspaceIds: string
-  theme: string
-  injectMode: string
-  devMode: string
-  devAction: string
+  enabled: boolean
+  workspaceMode: 'all' | 'selected'
+  workspaceIds: string[]
+  theme: 'dsh' | 'pink'
+  injectMode: 'per-turn' | 'every-step'
+  devMode: boolean
+  devFloating: boolean
+  devAction: 'create' | 'edit'
   devBookId: string
-  devEntryIds: string
-  devPerms: string
-  compatEnabled: string
-  exposeOperations: string
-  agentRpCompat: string
-  agentRpDebug: string
+  devEntryIds: string[]
+  devPerms: string[]
+  compatEnabled: boolean
+  exposeOperations: boolean
+  agentRpCompat: boolean
+  agentRpDebug: boolean
 }
 
 interface StWorldBook {
@@ -87,9 +95,11 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
   const [editable, setEditable] = useState<SettingsRecord | null>(null)
   const [saved, setSaved] = useState(false)
   const [ws, setWs] = useState<WorkItem[]>([])
+  const [compatExpanded, setCompatExpanded] = useState(false)
+  const [devExpanded, setDevExpanded] = useState(false)
 
   useEffect(() => {
-    api<SettingsRecord>('/settings').then(setLoaded).catch(() => setLoaded({ enabled: 'true', workspaceMode: 'all', workspaceIds: '[]', theme: 'dsh', injectMode: 'per-turn', devMode: 'false', devAction: 'create', devBookId: '', devEntryIds: '[]', devPerms: '["create","delete","update","read"]', compatEnabled: 'false', exposeOperations: 'false', agentRpCompat: 'false', agentRpDebug: 'false' }))
+    api<SettingsRecord>('/settings').then(setLoaded).catch(() => setLoaded({ enabled: true, workspaceMode: 'all', workspaceIds: [], theme: 'dsh', injectMode: 'per-turn', devMode: false, devFloating: false, devAction: 'create', devBookId: '', devEntryIds: [], devPerms: ['create', 'delete', 'update', 'read'], compatEnabled: false, exposeOperations: false, agentRpCompat: false, agentRpDebug: false }))
   }, [])
 
   useEffect(() => {
@@ -107,48 +117,22 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
     return workspaces.list.subscribe(read)
   }, [workspaces])
 
-  const settings = editable ?? loaded ?? { enabled: 'true', workspaceMode: 'all', workspaceIds: '[]', theme: 'dsh', injectMode: 'per-turn', devMode: 'false', devAction: 'create', devBookId: '', devEntryIds: '[]', devPerms: '["create","delete","update","read"]', compatEnabled: 'false', exposeOperations: 'false', agentRpCompat: 'false', agentRpDebug: 'false' }
-  const enabled = String(settings.enabled ?? '') !== 'false'
-  const mode = settings.workspaceMode === 'selected' ? 'selected' : 'all'
-  const theme = settings.theme === 'dsh' ? 'dsh' : 'pink'
-  const injectMode = settings.injectMode === 'every-step' ? 'every-step' : 'per-turn'
-  const devModeOn = String(settings.devMode ?? '') === 'true'
-  const compatOn = String(settings.compatEnabled ?? '') === 'true'
-  const exposeOpsOn = compatOn && String(settings.exposeOperations ?? '') === 'true'
-  const agentRpOn = compatOn && String(settings.agentRpCompat ?? '') === 'true'
-  const agentRpDebugOn = compatOn && String(settings.agentRpDebug ?? '') === 'true'
-  const devAction = settings.devAction === 'edit' ? 'edit' : 'create'
-  const devBookId = settings.devBookId ?? ''
-  const selected: string[] = useMemo(() => {
-    try {
-      const raw = settings.workspaceIds
-      if (!raw) return []
-      const p = JSON.parse(raw)
-      return Array.isArray(p) ? p.filter((x: unknown): x is string => typeof x === 'string') : []
-    } catch {
-      return []
-    }
-  }, [settings.workspaceIds])
-  const devEntries: string[] = useMemo(() => {
-    try {
-      const raw = settings.devEntryIds
-      if (!raw) return []
-      const p = JSON.parse(raw)
-      return Array.isArray(p) ? p.filter((x: unknown): x is string => typeof x === 'string') : []
-    } catch {
-      return []
-    }
-  }, [settings.devEntryIds])
-  const devPerms: string[] = useMemo(() => {
-    try {
-      const raw = settings.devPerms
-      if (!raw) return []
-      const p = JSON.parse(raw)
-      return Array.isArray(p) ? p.filter((x: unknown): x is string => typeof x === 'string') : []
-    } catch {
-      return []
-    }
-  }, [settings.devPerms])
+  const settings = editable ?? loaded ?? { enabled: true, workspaceMode: 'all', workspaceIds: [], theme: 'dsh', injectMode: 'per-turn', devMode: false, devFloating: false, devAction: 'create', devBookId: '', devEntryIds: [], devPerms: ['create', 'delete', 'update', 'read'], compatEnabled: false, exposeOperations: false, agentRpCompat: false, agentRpDebug: false }
+  const enabled = settings.enabled
+  const mode = settings.workspaceMode
+  const theme = settings.theme
+  const injectMode = settings.injectMode
+  const devModeOn = settings.devMode
+  const compatOn = settings.compatEnabled
+  // 子项显示/保存原始持久值；compatOn 只控制它们是否可操作和运行时是否生效。
+  const exposeOpsOn = settings.exposeOperations
+  const agentRpOn = settings.agentRpCompat
+  const agentRpDebugOn = settings.agentRpDebug
+  const devAction = settings.devAction
+  const devBookId = settings.devBookId
+  const selected = settings.workspaceIds
+  const devEntries = settings.devEntryIds
+  const devPerms = settings.devPerms
 
   const [books, setBooks] = useState<StWorldBook[]>([])
   const [devBookEntries, setDevBookEntries] = useState<StWorldEntry[]>([])
@@ -208,44 +192,70 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
   // 切换世界书/搜索词时回到第一页
   useEffect(() => { setEntryPage(1) }, [devBookId, entrySearch])
 
-  function patch(next: Record<string, unknown>) {
-    setEditable((prev) => Object.assign({}, prev ?? loaded ?? {}, next) as unknown as SettingsRecord)
+  function patch(next: Partial<SettingsRecord>) {
+    setEditable((prev) => ({ ...(prev ?? loaded ?? settings), ...next }))
   }
 
   function toggleWorkspace(id: string) {
     const has = selected.includes(id)
-    if (has) patch({ workspaceIds: JSON.stringify(selected.filter((x) => x !== id)) })
-    else patch({ workspaceIds: JSON.stringify([...selected, id]) })
+    if (has) patch({ workspaceIds: selected.filter((x) => x !== id) })
+    else patch({ workspaceIds: [...selected, id] })
   }
 
   const toggleDevEntry = useCallback((id: string) => {
     setEditable((prev) => {
-      const base = prev ?? loaded ?? {}
-      const raw = String((base as SettingsRecord).devEntryIds ?? '[]')
-      let cur: string[] = []
-      try {
-        const p = JSON.parse(raw)
-        if (Array.isArray(p)) cur = p.filter((x: unknown): x is string => typeof x === 'string')
-      } catch { /* 忽略 */ }
+      const base = prev ?? loaded ?? settings
+      const cur = base.devEntryIds
       const has = cur.includes(id)
-      const next = Object.assign({}, base, { devEntryIds: JSON.stringify(has ? cur.filter((x) => x !== id) : [...cur, id]) }) as unknown as SettingsRecord
-      return next
+      return { ...base, devEntryIds: has ? cur.filter((x) => x !== id) : [...cur, id] }
     })
   }, [loaded])
 
   function selectAllEntries() {
-    patch({ devEntryIds: JSON.stringify(Array.from(new Set([...devEntries, ...filteredEntries.map((e) => e.id)]))) })
+    patch({ devEntryIds: Array.from(new Set([...devEntries, ...filteredEntries.map((e) => e.id)])) })
   }
 
   function clearEntries() {
-    patch({ devEntryIds: JSON.stringify([]) })
+    patch({ devEntryIds: [] })
   }
 
   function togglePerm(p: string) {
     const has = devPerms.includes(p)
-    if (has) patch({ devPerms: JSON.stringify(devPerms.filter((x) => x !== p)) })
-    else patch({ devPerms: JSON.stringify([...devPerms, p]) })
+    if (has) patch({ devPerms: devPerms.filter((x) => x !== p) })
+    else patch({ devPerms: [...devPerms, p] })
   }
+
+  const devTargetView = devModeOn && devAction === 'edit'
+    ? h('div', null,
+        h('div', { className: 'wb-field-label', style: { marginTop: 12 } }, '让 AI 编写哪个世界书'),
+        h('div', { className: 'wb-pick-row' },
+          h('div', { className: 'wb-search' }, h('input', { type: 'text', className: 'wb-input', placeholder: '搜索世界书…', value: bookSearch, onChange: (e: { target: { value: string } }) => setBookSearch(e.target.value) })),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('select', { className: 'wb-select', style: { width: '100%', minHeight: 40 }, value: devBookId, onChange: (e: { target: { value: string } }) => { patch({ devBookId: e.target.value }); setEntrySearch('') } },
+              filteredBooks.length === 0 ? h('option', { value: '' }, '没有匹配的世界书') : [h('option', { key: '', value: '' }, '请选择世界书…'), ...filteredBooks.map((b) => h('option', { key: b.id, value: b.id }, `${b.name}（${b.entryCount} 条目${b.enabled ? '' : ' · 未启用'}）`))],
+            ),
+          ),
+        ),
+        devBookId ? h('div', { className: 'wb-dev-target', style: { marginTop: 12 } },
+          h('div', { className: 'wb-field-label' }, '允许 AI 编写的条目'),
+          h('div', { className: 'wb-entry-tools' },
+            h('div', { className: 'wb-entry-actions wb-entry-actions-main' },
+              h('input', { type: 'text', className: 'wb-input wb-entry-search', placeholder: '搜索条目…', value: entrySearch, style: { minHeight: 36 }, onChange: (e: { target: { value: string } }) => setEntrySearch(e.target.value) }),
+              h('button', { className: 'wb-btn', onClick: selectAllEntries }, '全选'),
+              h('button', { className: 'wb-btn', onClick: clearEntries }, '清空'),
+              h('span', { className: 'wb-hint' }, devEntries.length === 0 ? '全部' : `已选 ${devEntries.length}`),
+            ),
+            h('div', { className: 'wb-entry-pages wb-entry-pages-toolbar' },
+              h('button', { className: 'wb-btn wb-tool-btn', disabled: currentEntryPage <= 1, onClick: () => setEntryPage((p) => Math.max(1, p - 1)) }, '‹'),
+              h('span', { className: 'wb-hint' }, `${currentEntryPage}/${entryTotalPages}`),
+              h('select', { className: 'wb-select wb-pagesize-select', value: String(entryPageSize), onChange: (e: { target: { value: string } }) => { setEntryPageSize(Number(e.target.value)); setEntryPage(1) } }, [10, 20, 50].map((n) => h('option', { key: n, value: String(n) }, `${n} 条`))),
+              h('button', { className: 'wb-btn wb-tool-btn', disabled: currentEntryPage >= entryTotalPages, onClick: () => setEntryPage((p) => p + 1) }, '›'),
+            ),
+          ),
+          h('div', { className: 'wb-entry-grid', style: { display: 'grid', gap: 8, overflowY: 'auto' } }, filteredEntries.length === 0 ? h('div', { className: 'wb-hint' }, '该世界书还没有条目。') : pageEntries.map((e) => h(EntryCard, { key: e.id, entry: e, on: devEntries.includes(e.id), onToggle: toggleDevEntry }))),
+        ) : null,
+      )
+    : devModeOn ? h('div', { className: 'wb-hint' }, '新建模式') : null
 
   // AI 权限多选区块（增删改查；默认全选，不做一键全选/清空，用户手动逐项勾选）
   function permBlock() {
@@ -255,12 +265,9 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
       { key: 'update', label: '修改条目', hint: 'AI 可修改世界书中的条目' },
       { key: 'read', label: '读取', hint: 'AI 可读取世界书与条目' },
     ]
-    return h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)', flexWrap: 'wrap' } },
-      h('div', { style: { flex: 1, minWidth: 0 } },
-        h('div', { className: 'wb-name' }, '开发权限'),
-        h('div', { className: 'wb-meta' }, '控制 AI 编写世界书时的操作权限，可多选。'),
-      ),
-      h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+    return h('div', { className: 'wb-perm-block' },
+      h('div', { className: 'wb-name' }, 'AI权限'),
+      h('div', { className: 'wb-perm-buttons' },
         PERMS.map((p) => h('button', {
           key: p.key,
           className: 'wb-btn' + (devPerms.includes(p.key) ? ' active' : ''),
@@ -273,11 +280,12 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
 
   async function save() {
     try {
-      await api('/settings', { method: 'PUT', body: JSON.stringify({ enabled, workspaceMode: mode, workspaceIds: selected, theme, injectMode, devMode: devModeOn, devAction, devBookId, devEntryIds: devEntries, devPerms, compatEnabled: String(compatOn), exposeOperations: String(exposeOpsOn), agentRpCompat: String(agentRpOn), agentRpDebug: String(agentRpDebugOn) }) })
+      const saved = await api<SettingsRecord>('/settings', { method: 'PUT', body: JSON.stringify(settings) })
       writeThemeCache(theme)
       setSaved(true)
       changed()
-      setLoaded(editable ?? loaded)
+      setLoaded(saved)
+      setEditable(saved)
       setTimeout(() => setSaved(false), 1800)
     } catch (e) {
       await showAlert({ title: '保存失败', message: (e as Error).message })
@@ -286,185 +294,68 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
 
   // 设置表单内容体（弹窗与内嵌卡片共用）
   const renderBody = () => h('div', null,
-    // 启用开关
-    h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-      h('div', { style: { flex: 1 } },
-        h('div', { className: 'wb-name' }, '启用世界书'),
-        h('div', { className: 'wb-meta' }, '关闭后所有世界书不再注入模型上下文。'),
-      ),
-      h('div', { className: 'wb-switch' + (enabled ? '' : ' off'), onClick: () => patch({ enabled: String(!enabled) }) }),
-    ),
-    // 生效工作区
-    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '生效工作区'),
-    h('div', { style: { display: 'flex', gap: 8, marginBottom: 10 } },
-      h('button', { className: 'wb-btn' + (mode === 'all' ? ' active' : ''), onClick: () => patch({ workspaceMode: 'all' }) }, '全部工作区'),
-      h('button', { className: 'wb-btn' + (mode === 'selected' ? ' active' : ''), onClick: () => patch({ workspaceMode: 'selected' }) }, '仅指定工作区'),
-    ),
-    mode === 'selected'
-      ? h('div', { className: 'wb-list', style: { maxHeight: 200 } },
-          ws.length === 0
-            ? h('div', { className: 'wb-hint' }, '没有可用的工作区。')
-            : ws.map((w) => h('label', {
-                key: w.workspaceId,
-                style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 6px', cursor: 'pointer', borderRadius: 8 },
-              },
-                h('input', {
-                  type: 'checkbox', className: 'wb-radio', style: { width: 16, height: 16 },
-                  checked: selected.includes(w.workspaceId),
-                  onChange: () => toggleWorkspace(w.workspaceId),
-                }),
-                h('span', { style: { fontWeight: 600, color: 'var(--ml-ink)' } }, w.title),
-              )),
-        )
-      : null,
-    // 主题
-    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '主题'),
-    h('div', { style: { display: 'flex', gap: 8, marginBottom: 10 } },
-      h('button', { className: 'wb-btn' + (theme === 'dsh' ? ' active' : ''), onClick: () => patch({ theme: 'dsh' }) }, '跟随 DSH'),
-      h('button', { className: 'wb-btn' + (theme === 'pink' ? ' active' : ''), onClick: () => patch({ theme: 'pink' }) }, '粉色'),
-    ),
-    // 注入时机
-    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '注入时机'),
-    h('div', { className: 'wb-hint', style: { marginBottom: 8 } }, injectMode === 'per-turn' ? '正文注入：用户输入后注入一次，工具调用/思考轮不重复注入。' : '每轮注入：每次思考（含工具调用后的思考轮）都注入。可能会导致重复注入，不推荐使用。'),
-    h('div', { style: { display: 'flex', gap: 8, marginBottom: 10 } },
-      h('button', { className: 'wb-btn' + (injectMode === 'per-turn' ? ' active' : ''), onClick: () => patch({ injectMode: 'per-turn' }) }, '正文注入'),
-      h('button', { className: 'wb-btn' + (injectMode === 'every-step' ? ' active' : ''), onClick: () => patch({ injectMode: 'every-step' }) }, '每轮注入'),
-    ),
-    // 兼容模式总开关
-    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '兼容模式'),
-    h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-       h('div', { style: { flex: 1 } },
-         h('div', { className: 'wb-name' }, '兼容模式'),
-         h('div', { className: 'wb-meta' }, '总开关。关闭后所有兼容模式设置失效，本插件只处理全局世界书；开启后才读取宿主角色卡绑定世界书并接管宿主注入。'),
-      ),
-      h('div', { className: 'wb-switch' + (compatOn ? '' : ' off'), onClick: () => patch({ compatEnabled: String(!compatOn) }) }),
-    ),
-    h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-      h('div', { style: { flex: 1 } },
-        h('div', { className: 'wb-name' }, '向宿主暴露世界书操作接口'),
-        h('div', { className: 'wb-meta' }, '开启后提供 worldbook.operations 服务，宿主的脚本 / AI 能力可通过它对本插件的世界书进行读写（增删改、启停）。'),
-      ),
-       h('div', { className: 'wb-switch' + (exposeOpsOn ? '' : ' off'), style: !compatOn ? { opacity: 0.45, pointerEvents: 'none' } : undefined, onClick: () => patch({ exposeOperations: String(!exposeOpsOn) }) }),
-    ),
-    // agent-rp 是一个可选宿主适配器；协议数据仍使用通用 ST character_book。
-    h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-      h('div', { style: { flex: 1 } },
-        h('div', { className: 'wb-name' }, '兼容 dsh-agent-rp'),
-        h('div', { className: 'wb-meta' }, '适配 dsh-agent-rp 会话：拦截其世界书导入落本库、影子其 /rp-world-info 命令、读其会话事件（角色卡书/脚本书）经 worldbook.source/context 注入。需同时开启「接管宿主的世界书」。'),
-      ),
-       h('div', { className: 'wb-switch' + (agentRpOn ? '' : ' off'), style: !compatOn ? { opacity: 0.45, pointerEvents: 'none' } : undefined, onClick: () => patch({ agentRpCompat: String(!agentRpOn) }) }),
-    ),
-    // agent-rp 兼容调试
-    h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-      h('div', { style: { flex: 1 } },
-        h('div', { className: 'wb-name' }, 'agent-rp 兼容调试日志'),
-        h('div', { className: 'wb-meta' }, '开启后控制台实时打印每个 agent-rp 会话的角色 / 绑定书 / source 书（每会话每 2 秒一条）。另可访问 /api/worldbook/compat/agent-rp 看全量会话快照。'),
-      ),
-       h('div', { className: 'wb-switch' + (agentRpDebugOn ? '' : ' off'), style: !compatOn ? { opacity: 0.45, pointerEvents: 'none' } : undefined, onClick: () => patch({ agentRpDebug: String(!agentRpDebugOn) }) }),
-    ),
-    // 开发世界书模式
-    h('div', { className: 'wb-field-label', style: { marginTop: 14 } }, '开发世界书模式'),
-    h('div', { className: 'wb-row', style: { cursor: 'default', background: 'var(--ml-bg-surface)' } },
-      h('div', { style: { flex: 1 } },
-        h('div', { className: 'wb-name' }, '启用开发世界书模式'),
-        h('div', { className: 'wb-meta' }, '开启后向 AI 暴露 worldbook 编辑工具，AI 可直接编写符合 ST 格式的世界书。'),
-      ),
-      h('div', { className: 'wb-switch' + (devModeOn ? '' : ' off'), onClick: () => patch({ devMode: String(!devModeOn) }) }),
-    ),
-    devModeOn
-      ? h('div', { style: { marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 } },
-          // AI 权限（创建/编辑模式通用，恒显）
-          permBlock(),
-          // 开发模式：新建 / 编辑
+    h('div', { className: 'wb-settings-layout' },
+      h('div', { className: 'wb-settings-intro' },
+        h('div', { className: 'wb-settings-kicker' }, 'WORLD BOOK CONFIGURATION'),
+        h('div', { className: 'wb-settings-intro-row' },
           h('div', null,
-            h('div', { className: 'wb-field-label' }, '开发模式'),
-            h('div', { style: { display: 'flex', gap: 8 } },
-              h('button', { className: 'wb-btn' + (devAction === 'create' ? ' active' : ''), onClick: () => patch({ devAction: 'create' }) }, '新建'),
-              h('button', { className: 'wb-btn' + (devAction === 'edit' ? ' active' : ''), onClick: () => patch({ devAction: 'edit' }) }, '编辑'),
-            ),
+            h('div', { className: 'wb-settings-title' }, '世界书设置'),
+            h('div', { className: 'wb-hint' }, enabled ? '世界书正在当前环境中运行' : '世界书已暂停运行'),
           ),
-          devAction === 'create'
-            ? h('div', null,
-                h('div', { className: 'wb-hint' }, '新建模式：AI 可新建世界书并编辑其全部条目。'),
-              )
-            : h('div', null,
-                // 编辑模式：选世界书（搜索框 + 下拉框左右并排）
-                h('div', { className: 'wb-field-label', style: { marginTop: 12 } }, '让 AI 编写哪个世界书'),
-                h('div', { className: 'wb-pick-row' },
-                  h('div', { className: 'wb-search' },
-                    h('input', {
-                      type: 'text', className: 'wb-input', placeholder: '🔍 搜索世界书…', value: bookSearch,
-                      onChange: (e: { target: { value: string } }) => setBookSearch(e.target.value),
-                    }),
-                  ),
-                  h('div', { style: { flex: 1, minWidth: 0 } },
-                    h('select', {
-                      className: 'wb-select', style: { width: '100%', minHeight: 40 }, value: devBookId,
-                      onChange: (e: { target: { value: string } }) => { patch({ devBookId: e.target.value }); setEntrySearch('') },
-                    },
-                      filteredBooks.length === 0
-                        ? h('option', { value: '' }, '没有匹配的世界书')
-                        : [h('option', { key: '', value: '' }, '请选择世界书…'),
-                            ...filteredBooks.map((b) => h('option', { key: b.id, value: b.id }, `${b.name}（${b.entryCount} 条目${b.enabled ? '' : ' · 未启用'}）`))],
-                    ),
-                  ),
-                ),
-                devBookId
-                  ? h('div', { style: { marginTop: 12 } },
-                      h('div', { className: 'wb-field-label' }, '允许 AI 编写的条目（多选，不选 = 全部条目）'),
-                      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, justifyContent: 'space-between' } },
-                        h('div', { style: { display: 'flex', gap: 8, alignItems: 'stretch' } },
-                          h('input', {
-                            type: 'text', className: 'wb-input', placeholder: '🔍 搜索条目…', value: entrySearch,
-                            style: { width: 120, flex: 'none', minHeight: 36 },
-                            onChange: (e: { target: { value: string } }) => setEntrySearch(e.target.value),
-                          }),
-                          h('button', { className: 'wb-btn', style: { height: 36, display: 'inline-flex', alignItems: 'center' }, onClick: selectAllEntries }, '全选'),
-                          h('button', { className: 'wb-btn', style: { height: 36, display: 'inline-flex', alignItems: 'center' }, onClick: clearEntries }, '清空'),
-                          h('span', { className: 'wb-hint', style: { alignSelf: 'center' } }, devEntries.length === 0 ? '当前：全部条目' : `当前：${devEntries.length} 条`),
-                        ),
-                        // 分页：上一页 / 第 x/y 页 / 每页条数下拉 / 下一页（同编辑世界书条目）
-                        h('div', { className: 'wb-actions', style: { gap: 8, alignItems: 'center' } },
-                          h('button', { className: 'wb-btn wb-tool-btn wb-pager-btn', disabled: currentEntryPage <= 1, onClick: () => setEntryPage((p) => Math.max(1, p - 1)) }, '‹  上一页'),
-                          h('span', { className: 'wb-hint', style: { whiteSpace: 'nowrap', fontSize: 12 } }, `第 ${currentEntryPage}/${entryTotalPages} 页`),
-                          h('select', {
-                            className: 'wb-select wb-pagesize-select', value: String(entryPageSize), title: '每页条数',
-                            onChange: (e: { target: { value: string } }) => { setEntryPageSize(Number(e.target.value)); setEntryPage(1) },
-                          },
-                            [10, 20, 50].map((n) => h('option', { key: n, value: String(n) }, `${n} 条`)),
-                          ),
-                          h('button', { className: 'wb-btn wb-tool-btn wb-pager-btn', disabled: currentEntryPage >= entryTotalPages, onClick: () => setEntryPage((p) => p + 1) }, '下一页  ›'),
-                        ),
-                      ),
-                      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 8, maxHeight: 220, overflowY: 'auto' } },
-                        filteredEntries.length === 0
-                          ? h('div', { className: 'wb-hint' }, '该世界书还没有条目。')
-                          : [
-                              ...pageEntries.map((e) => h(EntryCard, {
-                                key: e.id,
-                                entry: e,
-                                on: devEntries.includes(e.id),
-                                onToggle: toggleDevEntry,
-                              })),
-                              filteredEntries.length > entryPageSize
-                                ? h('div', { className: 'wb-hint', style: { padding: '6px 8px', gridColumn: '1 / -1' } }, `共 ${filteredEntries.length} 条，用搜索精确定位；「全选」会选中全部匹配条目。`)
-                                : null,
-                            ],
-                      ),
-                    )
-                  : null,
-              ),
-        )
-      : null,
-    // 保存
-    h('div', { className: 'wb-actions', style: { marginTop: 16 } },
-      h('button', { className: 'wb-btn primary', onClick: save }, saved ? '已保存 ✓' : '保存'),
+          h('span', { className: 'wb-settings-status' + (enabled ? ' is-on' : '') }, enabled ? '运行中' : '已停用'),
+        ),
+      ),
+      h('div', { className: 'wb-settings-grid' },
+        h('section', { className: 'wb-settings-section' },
+          h('div', { className: 'wb-settings-section-head' }, h('span', { className: 'wb-settings-section-icon' }, '◈'), h('div', null, h('strong', null, '基础设置'), h('span', null, '控制世界书的生效范围与注入方式'))),
+          h('div', { className: 'wb-settings-rows' },
+            h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '启用世界书'), h('div', { className: 'wb-hint' }, '关闭后不会向对话注入内容')), h('div', { className: 'wb-switch' + (enabled ? '' : ' off'), onClick: () => patch({ enabled: !enabled }) })),
+          ),
+          h('div', { className: 'wb-setting-field' },
+            h('div', { className: 'wb-field-label' }, '生效工作区'),
+            h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (mode === 'all' ? ' active' : ''), onClick: () => patch({ workspaceMode: 'all' }) }, '全部工作区'), h('button', { className: 'wb-btn' + (mode === 'selected' ? ' active' : ''), onClick: () => patch({ workspaceMode: 'selected' }) }, '仅指定工作区')),
+            mode === 'selected' ? h('div', { className: 'wb-list wb-workspace-list' }, ws.length === 0 ? h('div', { className: 'wb-hint' }, '没有可用的工作区。') : ws.map((w) => h('label', { key: w.workspaceId, className: 'wb-check-row' }, h('input', { type: 'checkbox', className: 'wb-radio', checked: selected.includes(w.workspaceId), onChange: () => toggleWorkspace(w.workspaceId) }), h('span', null, w.title)))) : null,
+          ),
+          h('div', { className: 'wb-setting-field' },
+            h('div', { className: 'wb-field-label' }, '主题'),
+            h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (theme === 'dsh' ? ' active' : ''), onClick: () => patch({ theme: 'dsh' }) }, '跟随 DSH'), h('button', { className: 'wb-btn' + (theme === 'pink' ? ' active' : ''), onClick: () => patch({ theme: 'pink' }) }, '粉色')),
+          ),
+          h('div', { className: 'wb-setting-field' },
+            h('div', { className: 'wb-field-label' }, '注入时机'),
+            h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (injectMode === 'per-turn' ? ' active' : ''), onClick: () => patch({ injectMode: 'per-turn' }) }, '正文注入'), h('button', { className: 'wb-btn' + (injectMode === 'every-step' ? ' active' : ''), onClick: () => patch({ injectMode: 'every-step' }) }, '每轮注入')),
+          ),
+        ),
+        h('section', { className: 'wb-settings-section' },
+          h('div', { className: 'wb-settings-section-head wb-settings-section-toggle', role: 'button', tabIndex: 0, 'aria-expanded': compatExpanded, onClick: () => setCompatExpanded((value) => !value), onKeyDown: (e: { key: string }) => { if (e.key === 'Enter' || e.key === ' ') setCompatExpanded((value) => !value) } }, h('span', { className: 'wb-settings-section-icon' }, '⇄'), h('div', null, h('strong', null, '兼容模式'), h('span', null, '连接宿主与其他世界书工具')), h('span', { className: 'wb-settings-chevron' + (compatExpanded ? ' is-open' : '') }, '⌄')),
+          compatExpanded ? h('div', { className: 'wb-settings-rows' },
+            h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '兼容模式'), h('div', { className: 'wb-hint' }, '开启后可使用下方的兼容选项')), h('div', { className: 'wb-switch' + (compatOn ? '' : ' off'), onClick: () => patch({ compatEnabled: !compatOn }) })),
+            h('div', { className: 'wb-setting-row' + (!compatOn ? ' is-disabled' : '') }, h('div', null, h('div', { className: 'wb-name' }, '向宿主暴露世界书操作接口')), h('div', { className: 'wb-switch' + (exposeOpsOn ? '' : ' off'), onClick: () => compatOn && patch({ exposeOperations: !exposeOpsOn }) })),
+            h('div', { className: 'wb-setting-row' + (!compatOn ? ' is-disabled' : '') }, h('div', null, h('div', { className: 'wb-name' }, '兼容 dsh-agent-rp')), h('div', { className: 'wb-switch' + (agentRpOn ? '' : ' off'), onClick: () => compatOn && patch({ agentRpCompat: !agentRpOn }) })),
+            h('div', { className: 'wb-setting-row' + (!compatOn ? ' is-disabled' : '') }, h('div', null, h('div', { className: 'wb-name' }, 'agent-rp 兼容调试日志')), h('div', { className: 'wb-switch' + (agentRpDebugOn ? '' : ' off'), onClick: () => compatOn && patch({ agentRpDebug: !agentRpDebugOn }) })),
+          ) : null,
+        ),
+        h('section', { className: 'wb-settings-section wb-settings-developer' },
+          h('div', { className: 'wb-settings-section-head wb-settings-section-toggle', role: 'button', tabIndex: 0, 'aria-expanded': devExpanded, onClick: () => setDevExpanded((value) => !value), onKeyDown: (e: { key: string }) => { if (e.key === 'Enter' || e.key === ' ') setDevExpanded((value) => !value) } }, h('span', { className: 'wb-settings-section-icon' }, '✦'), h('div', null, h('strong', null, '开发模式'), h('span', null, '为 AI 提供受控的世界书编辑能力')), h('span', { className: 'wb-settings-chevron' + (devExpanded ? ' is-open' : '') }, '⌄')),
+          devExpanded ? h('div', null,
+            h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '开发模式'), h('div', { className: 'wb-hint' }, '仅在需要 AI 编辑世界书时开启')), h('div', { className: 'wb-switch' + (devModeOn ? '' : ' off'), onClick: () => patch({ devMode: !devModeOn }) })),
+            devModeOn ? h('div', { className: 'wb-dev-controls' },
+              h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '悬浮窗')), h('div', { className: 'wb-switch' + (settings.devFloating ? '' : ' off'), onClick: () => patch({ devFloating: !settings.devFloating }) })),
+              permBlock(),
+              h('div', { className: 'wb-setting-field' }, h('div', { className: 'wb-field-label' }, '编辑方式'), h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (devAction === 'create' ? ' active' : ''), onClick: () => patch({ devAction: 'create' }) }, '新建'), h('button', { className: 'wb-btn' + (devAction === 'edit' ? ' active' : ''), onClick: () => patch({ devAction: 'edit' }) }, '编辑'))),
+            ) : null,
+            devTargetView,
+          ) : null,
+        ),
+      ),
+      h('div', { className: 'wb-settings-footer' }, h('span', { className: 'wb-hint' }, saved ? '设置已保存' : '修改后点击保存即可生效'), h('button', { className: 'wb-btn primary', onClick: save }, saved ? '已保存 ✓' : '保存设置')),
     ),
   )
 
   if (variant === 'card') {
     return h('div', { className: 'wb-card', style: { width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' } },
-      h('div', { className: 'wb-card-hd' }, '世界书 · 设置'),
+      h('div', { className: 'wb-card-hd' },
+        '世界书 · 设置',
+      ),
       h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0 } },
         compatAlert
           ? h('div', { className: 'wb-compat-alert', style: { marginBottom: 12 } },

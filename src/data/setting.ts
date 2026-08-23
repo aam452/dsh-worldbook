@@ -26,6 +26,100 @@ export function set(key: string, value: string, category = 'general'): void {
   }
 }
 
+// Settings API uses one typed document. Keep persistence details here so a new
+// setting cannot be added to the client payload without a matching save path.
+export interface SettingsDocument {
+  enabled: boolean
+  workspaceMode: 'all' | 'selected'
+  workspaceIds: string[]
+  theme: 'dsh' | 'pink'
+  injectMode: InjectMode
+  devMode: boolean
+  devFloating: boolean
+  devAction: 'create' | 'edit'
+  devBookId: string
+  devEntryIds: string[]
+  devPerms: DevPerm[]
+  compatEnabled: boolean
+  exposeOperations: boolean
+  agentRpCompat: boolean
+  agentRpDebug: boolean
+}
+
+export const defaultSettings = (): SettingsDocument => ({
+  enabled: true,
+  workspaceMode: 'all',
+  workspaceIds: [],
+  theme: 'dsh',
+  injectMode: 'per-turn',
+  devMode: false,
+  devFloating: false,
+  devAction: 'create',
+  devBookId: '',
+  devEntryIds: [],
+  devPerms: ['create', 'delete', 'update', 'read'],
+  compatEnabled: false,
+  exposeOperations: false,
+  agentRpCompat: false,
+  agentRpDebug: false,
+})
+
+export function settings(): SettingsDocument {
+  return {
+    enabled: enabled(),
+    workspaceMode: workspaceMode(),
+    workspaceIds: workspaceIds(),
+    theme: theme() === 'pink' ? 'pink' : 'dsh',
+    injectMode: injectMode(),
+    devMode: devMode(),
+    devFloating: devFloating(),
+    devAction: devAction(),
+    devBookId: devBookId(),
+    devEntryIds: devEntryIds(),
+    devPerms: devPerms(),
+    compatEnabled: compatEnabled(),
+    exposeOperations: get('exposeOperations') === 'true',
+    agentRpCompat: get('agentRpCompat') === 'true',
+    agentRpDebug: get('agentRpDebug') === 'true',
+  }
+}
+
+export function saveSettings(input: SettingsDocument): SettingsDocument {
+  const next: SettingsDocument = {
+    ...defaultSettings(),
+    ...input,
+    workspaceMode: input.workspaceMode === 'selected' ? 'selected' : 'all',
+    workspaceIds: Array.from(new Set(input.workspaceIds.filter((x): x is string => typeof x === 'string'))),
+    injectMode: input.injectMode === 'every-step' ? 'every-step' : 'per-turn',
+    devAction: input.devAction === 'edit' ? 'edit' : 'create',
+    devEntryIds: Array.from(new Set(input.devEntryIds.filter((x): x is string => typeof x === 'string'))),
+    devPerms: Array.from(new Set(input.devPerms.filter((x): x is DevPerm => ALL_PERMS.includes(x)))),
+  }
+  const db = getDb()
+  db.exec('BEGIN')
+  try {
+    setEnabled(next.enabled)
+    setWorkspaceScope(next.workspaceMode, next.workspaceIds)
+    setTheme(next.theme)
+    setInjectMode(next.injectMode)
+    setDevMode(next.devMode)
+    setDevFloating(next.devFloating)
+    setDevAction(next.devAction)
+    setDevBookId(next.devBookId)
+    setDevEntryIds(next.devEntryIds)
+    setDevPerms(next.devPerms)
+    setCompatEnabled(next.compatEnabled)
+    setExposeOperations(next.exposeOperations)
+    setAgentRpCompat(next.agentRpCompat)
+    setAgentRpDebug(next.agentRpDebug)
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+  return settings()
+}
+
 // ── 注入时机 ──
 // 'every-step' = 每轮（每个 step，含工具调用后的思考）都注入；
 // 'per-turn' = 正文注入，一次 turn 只注入一次（在 turn 的第一个 step 注入）。
@@ -76,6 +170,14 @@ export function devMode(): boolean {
 
 export function setDevMode(value: boolean): void {
   set('devMode', value ? 'true' : 'false', 'general')
+}
+
+export function devFloating(): boolean {
+  return get('devFloating') === 'true'
+}
+
+export function setDevFloating(value: boolean): void {
+  set('devFloating', value ? 'true' : 'false', 'general')
 }
 
 // 开发模式动作：create=新建（AI 可新建世界书并编辑全部条目）；edit=编辑（AI 编辑指定世界书的指定条目）

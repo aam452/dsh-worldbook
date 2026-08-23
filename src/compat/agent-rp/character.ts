@@ -181,6 +181,13 @@ export function applyAgentRpContext(ctx: Context): (() => void) | null {
   disposers.push(ctx.on('agent/inbox/claimed', ({ agent }) => {
     currentAgent = agent
   }, { global: true }))
+  // 新建和恢复已有会话都会经过 session-start；不能只依赖 created/claimed，
+  // 否则切换到已有会话时管理页会继续展示上一个会话的角色卡世界书。
+  disposers.push(ctx.on('agent/session-start', ({ agent }) => {
+    sessions.set(String(agent.id), agent)
+    sessions.set(String(agent.session.id), agent)
+    currentAgent = agent
+  }, { global: true }))
   disposers.push(ctx.on('agent/disposed', ({ agent }) => {
     for (const id of [String(agent.id), String(agent.session.id)]) sessions.delete(id)
     forgetSession(String(agent.id))
@@ -193,9 +200,9 @@ export function applyAgentRpContext(ctx: Context): (() => void) | null {
     },
   }
   const characterBooks: WorldbookCharacterBooks = {
-    list() {
+    list(requestedSessionId) {
       const out = new Map<string, CharacterBookReference>()
-      const agent = currentAgent
+      const agent = requestedSessionId === undefined ? undefined : sessions.get(requestedSessionId)
       if (!agent) return []
       const sessionId = String(agent.id)
       for (const card of assembleSessionBooks(agent.session.events).filter(book => book.source === 'character')) {

@@ -5,7 +5,7 @@ import { api, changed, onChanged } from './api'
 import type { ApiErr } from './api'
 import { showConfirm, showAlert } from './wb-confirm.tsx'
 import { WorldbookSettingsDialog } from './worldbook-settings.tsx'
-import type { WorkspacesService } from './worldbook-settings.tsx'
+import type { WorkspacesService, SessionsService } from './worldbook-settings.tsx'
 
 function errText(e: unknown): string {
   return e && typeof e === 'object' && 'message' in e ? String((e as ApiErr).message) : String(e)
@@ -50,6 +50,22 @@ function useData<T>(getter: () => Promise<T>): [T | null, string, () => void] {
     return onChanged(reload)
   }, [reload])
   return [data, error, reload]
+}
+
+function useCharacterBooks(sessionId: string | undefined): [CharacterBookReference[] | null, () => void] {
+  const [data, setData] = useState<CharacterBookReference[] | null>(null)
+  const reload = useCallback(() => {
+    if (!sessionId) {
+      setData([])
+      return
+    }
+    api<CharacterBookReference[]>(`/character-books?sessionId=${encodeURIComponent(sessionId)}`).then(setData, () => setData([]))
+  }, [sessionId])
+  useEffect(() => {
+    reload()
+    return onChanged(reload)
+  }, [reload])
+  return [data, reload]
 }
 
 interface StWorldEntry {
@@ -158,10 +174,11 @@ const SORT_OPTIONS = [
 // 需要方向切换的排序（custom 不显示方向按钮）
 const SORT_HAS_DIRECTION = ['priority', 'comment', 'content', 'depth', 'order', 'uid', 'probability']
 
-function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
+function WorldbooksPage({ workspaces, sessions }: { workspaces?: WorkspacesService; sessions?: SessionsService }) {
   const [books, , reload] = useData<StWorldBook[]>(() => api('/worldbooks'))
-  const [characterBooks, , reloadCharacterBooks] = useData<CharacterBookReference[]>(() => api('/character-books'))
-  const [compatSettings] = useData<{ compatEnabled?: string }>(() => api('/settings'))
+  const [sessionId, setSessionId] = useState<string | undefined>(() => sessions?.list?.getSnapshot().current)
+  const [characterBooks, reloadCharacterBooks] = useCharacterBooks(sessionId)
+  const [compatSettings] = useData<{ compatEnabled?: boolean }>(() => api('/settings'))
   const [selectedId, setSelectedId] = useState<string | null>(() => readSelectedBookCache())
   const [msg, setMsg] = useState('')
   const [successToast, setSuccessToast] = useState('')
@@ -173,6 +190,14 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
   const [showSettings, setShowSettings] = useState(false)
   const bookList = (books ?? []).filter((b) => !onlyEnabled || b.enabled)
   const selected = bookList.find((b) => b.id === selectedId) ?? null
+
+  useEffect(() => {
+    const list = sessions?.list
+    if (!list) return
+    const update = () => setSessionId(list.getSnapshot().current)
+    update()
+    return list.subscribe(update)
+  }, [sessions])
 
   // 选中变化即写缓存，下次进入页面恢复
   useEffect(() => { writeSelectedBookCache(selectedId) }, [selectedId])
@@ -240,7 +265,7 @@ function WorldbooksPage({ workspaces }: { workspaces?: WorkspacesService }) {
     successToast
       ? h(OperationToast, { message: successToast })
       : null,
-    compatSettings?.compatEnabled === 'true' && characterBooks && characterBooks.length > 0
+    compatSettings?.compatEnabled === true && characterBooks && characterBooks.length > 0
       ? h('div', { className: 'wb-card', style: { maxHeight: 240, display: 'flex', flexDirection: 'column' } },
           h('div', { className: 'wb-card-hd' }, '当前角色卡绑定的世界书', h('span', { style: { flex: 1 } })),
           h('div', { className: 'wb-card-bd', style: { overflowY: 'auto', minHeight: 0, flex: 1 } },

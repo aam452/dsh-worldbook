@@ -17,12 +17,12 @@ import './slots.ts'
 import { WorldbooksPage } from './worldbook-page.tsx'
 import { WorldbookSettingsDialog } from './worldbook-settings.tsx'
 import { ConfirmHost } from './wb-confirm.tsx'
-import type { WorkspacesService } from './worldbook-settings.tsx'
+import type { WorkspacesService, SessionsService } from './worldbook-settings.tsx'
 import { readThemeCache, writeThemeCache, type WorldbookTheme } from './wb-theme.ts'
 import themeCss from './theme.css'
 
 export const name = 'dsh-worldbook-client'
-export const inject = ['slots', 'workspaces', 'locale']
+export const inject = ['slots', 'workspaces', 'sessions', 'locale']
 
 // 本插件 UI 文案命名空间：注册后 ctx.locale.bind 返回按当前语言读取的翻译函数。
 const LOCALE_NS = 'dsh.worldbook'
@@ -42,10 +42,7 @@ interface SlotsService {
   subscribe?(key: string, fn: () => void): () => void
 }
 
-// 统一包装：注入独立主题根容器，并按设置切换主题。
-// theme: 'dsh'=跟随 dsh（默认，加 .dsh-theme 类映射 dsh 变量）；'pink'=独立粉色主题。
-// 初始值从同步缓存读取（默认 dsh），避免首帧闪烁；服务端仍是权威，mount 后校正。
-function WithRoot({ children }: { children: ReactNode }) {
+function WithRoot({ children, sessions, workspaces }: { children?: ReactNode; sessions?: SessionsService; workspaces?: WorkspacesService }) {
   const [theme, setTheme] = useState<WorldbookTheme>(() => readThemeCache())
   useEffect(() => {
     let alive = true
@@ -87,6 +84,7 @@ export function apply(ctx: ClientContext) {
   if (!slots) return
 
   const workspaces = ctx.workspaces as unknown as WorkspacesService | undefined
+  const sessions = ctx.sessions as unknown as SessionsService | undefined
 
   // 注册本插件 UI 文案词典（中英），供 label 等随语言切换动态读取。
   ctx.effect(
@@ -125,7 +123,7 @@ export function apply(ctx: ClientContext) {
     NAV_SLOT,
     () => slots.register(
       { name: NAV_SLOT, priority: 0 },
-      () => h(WithRoot, null, h(WorldbooksPage, { workspaces })),
+      () => h(WithRoot, { workspaces, sessions }, h(WorldbooksPage, { workspaces, sessions })),
     ),
   )
 
@@ -134,7 +132,7 @@ export function apply(ctx: ClientContext) {
     SETTINGS_CARD_SLOT,
     () => slots.register(
       { name: SETTINGS_CARD_SLOT, priority: 0 },
-      () => h(WithRoot, null, h(WorldbookSettingsDialog, { workspaces, variant: 'card' })),
+      () => h(WithRoot, { workspaces, sessions }, h(WorldbookSettingsDialog, { workspaces, variant: 'card' })),
     ),
   )
 
@@ -147,7 +145,7 @@ export function apply(ctx: ClientContext) {
     try {
       sectionDisposer = slots.register(
         { name: SECTION_SLOT, id: 'worldbook', order: 90, label: sectionTitle },
-        () => h(WithRoot, null, h(WorldbooksPage, { workspaces })),
+        () => h(WithRoot, { workspaces, sessions }, h(WorldbooksPage, { workspaces, sessions })),
       )
     } catch {
       sectionDisposer = null

@@ -126,5 +126,5 @@ export interface WorldbookCharacterBookReference {
 }
 
 export interface WorldbookCharacterBooks {
-  list(): WorldbookCharacterBookReference[]
+  list(sessionId?: string): WorldbookCharacterBookReference[]
 }

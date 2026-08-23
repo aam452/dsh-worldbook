@@ -9,6 +9,7 @@ import { resolveWorldbookContext, resolveBoundBooks } from '../lib/data/characte
 import { createOperations } from '../lib/integration/operations.js'
 import { resolveSessionBooks, resolveSessionInjection } from '../lib/integration/source.js'
 import { applyEngine } from '../lib/integration/engine.js'
+import { scopeGuard } from '../lib/tools/index.js'
 
 const dir = mkdtempSync(join(tmpdir(), 'wb-compat-'))
 openDb(dir)
@@ -30,6 +31,9 @@ check('兼容关闭时 exposeOperations 失效', setting.exposeOperations() === 
 setting.setCompatEnabled(true)
 check('兼容开启时 exposeOperations 可开', setting.exposeOperations() === true)
 setting.setCompatEnabled(false)
+check('兼容关闭不改变 exposeOperations 原始值', setting.get('exposeOperations') === 'true')
+setting.setCompatEnabled(true)
+check('重新开启恢复 exposeOperations', setting.exposeOperations() === true)
 setting.setExposeOperations(false)
 
 console.log('2) data 层：按名查找')
@@ -147,6 +151,21 @@ check('操作不存在书抛错', threw)
 let invalidCode = ''
 try { ops.createBook({ name: '', entries: [] }) } catch (error) { invalidCode = error?.code ?? '' }
 check('非法书名返回 INVALID_ARGUMENT', invalidCode === 'INVALID_ARGUMENT')
+
+console.log('10) 开发模式条目权限')
+setting.setDevMode(true)
+setting.setDevAction('edit')
+setting.setDevBookId(bound.id)
+setting.setDevEntryIds(['allowed-entry'])
+setting.setDevPerms(['update', 'delete', 'create', 'read'])
+check('选中条目允许更新', scopeGuard({ action: 'update_entry', bookId: bound.id, entryId: 'allowed-entry' }) === undefined)
+check('未选中条目拒绝更新', scopeGuard({ action: 'update_entry', bookId: bound.id, entryId: 'other-entry' })?.ok === false)
+check('缺少条目标识拒绝更新', scopeGuard({ action: 'update_entry', bookId: bound.id })?.ok === false)
+check('选中条目后拒绝新增', scopeGuard({ action: 'create_entry', bookId: bound.id })?.ok === false)
+check('其它世界书拒绝更新', scopeGuard({ action: 'update_entry', bookId: 'other-book', entryId: 'allowed-entry' })?.ok === false)
+setting.setDevEntryIds([])
+check('未选择条目时允许更新全部条目', scopeGuard({ action: 'update_entry', bookId: bound.id, entryId: 'other-entry' }) === undefined)
+setting.setDevMode(false)
 
 console.log('9) worldbook.engine active 实时反映设置')
 let provided = null

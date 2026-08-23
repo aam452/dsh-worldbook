@@ -194,6 +194,7 @@
   overflow: hidden;
   animation: wb-card-in .2s ease;
 }
+
 @keyframes wb-card-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -212,8 +213,56 @@
   border-bottom: 1px solid var(--ml-line);
   font-size: 15px; font-weight: 800; color: var(--ml-pink-6);
 }
+.dsh-worldbook-root .wb-card-title { flex: 1; cursor: grab; user-select: none; touch-action: none; }
+.dsh-worldbook-root .wb-card-title:active { cursor: grabbing; }
+.dsh-worldbook-root .wb-perm-block { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
+.dsh-worldbook-root .wb-perm-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.dsh-worldbook-root .wb-dev-controls { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+.dsh-worldbook-root .wb-dev-target { padding-top: 2px; border-top: 1px solid var(--ml-line); }
+.dsh-worldbook-root .wb-entry-tools { display: flex; flex-direction: column; gap: 8px; }
+.dsh-worldbook-root .wb-entry-search { width: 100%; min-width: 0; }
+.dsh-worldbook-root .wb-entry-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dsh-worldbook-root .wb-entry-actions-main { gap: 5px; }
+.dsh-worldbook-root .wb-entry-actions-main .wb-entry-search { flex: 1 1 220px; width: auto; }
+.dsh-worldbook-root .wb-entry-actions-main .wb-btn { padding: 7px 10px; }
+.dsh-worldbook-root .wb-entry-pages { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dsh-worldbook-root .wb-entry-pages-toolbar { justify-content: flex-end; margin-top: -2px; }
+.dsh-worldbook-root .wb-entry-grid { grid-template-columns: 1fr !important; max-height: 220px; }
 .dsh-worldbook-root .wb-card-bd { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
 .dsh-worldbook-root .wb-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dsh-worldbook-root .wb-settings-layout { display: flex; flex-direction: column; gap: 11px; }
+.dsh-worldbook-root .wb-settings-intro { padding: 2px 2px 4px; }
+.dsh-worldbook-root .wb-settings-kicker { color: var(--ml-pink-6); font-size: 10px; font-weight: 800; letter-spacing: 1.3px; }
+.dsh-worldbook-root .wb-settings-intro-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 3px; }
+.dsh-worldbook-root .wb-settings-title { color: var(--ml-ink); font-size: 21px; font-weight: 800; line-height: 1.35; }
+.dsh-worldbook-root .wb-settings-status { flex: none; border: 1px solid var(--ml-line); border-radius: 99px; padding: 4px 10px; color: var(--ml-ink-2); background: var(--ml-bg-surface); font-size: 11px; font-weight: 700; }
+.dsh-worldbook-root .wb-settings-status.is-on { border-color: var(--ml-pink-3); background: var(--ml-pink-0); color: var(--ml-pink-7); }
+.dsh-worldbook-root .wb-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.dsh-worldbook-root .wb-settings-section { min-width: 0; padding: 12px 14px; border: 1px solid var(--ml-line); border-radius: 16px; background: var(--ml-bg-surface); }
+.dsh-worldbook-root .wb-settings-section:first-child { grid-column: 1 / -1; }
+.dsh-worldbook-root .wb-settings-section:nth-child(2) { grid-column: 1 / -1; }
+.dsh-worldbook-root .wb-settings-developer { grid-column: 1 / -1; }
+.dsh-worldbook-root .wb-settings-section-head { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--ml-line); }
+.dsh-worldbook-root .wb-settings-section-toggle { cursor: pointer; user-select: none; }
+.dsh-worldbook-root .wb-settings-section-toggle:hover .wb-settings-section-icon { background: var(--ml-pink-1); }
+.dsh-worldbook-root .wb-settings-chevron { margin-left: auto; color: var(--ml-ink-2); font-size: 17px; line-height: 26px; transform: rotate(-90deg); transition: transform .18s ease, color .15s ease; }
+.dsh-worldbook-root .wb-settings-chevron.is-open { transform: rotate(0deg); color: var(--ml-pink-6); }
+.dsh-worldbook-root .wb-settings-section-head strong { display: block; color: var(--ml-ink); font-size: 14px; line-height: 1.35; }
+.dsh-worldbook-root .wb-settings-section-head span:not(.wb-settings-section-icon) { display: block; margin-top: 2px; color: var(--ml-ink-2); font-size: 11px; }
+.dsh-worldbook-root .wb-settings-section-icon { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; background: var(--ml-pink-0); color: var(--ml-pink-6); font-size: 14px; font-weight: 800; }
+.dsh-worldbook-root .wb-settings-rows { display: flex; flex-direction: column; }
+.dsh-worldbook-root .wb-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 46px; padding: 6px 0; border-bottom: 1px solid var(--ml-line); }
+.dsh-worldbook-root .wb-setting-row:last-child { border-bottom: 0; }
+.dsh-worldbook-root .wb-setting-row.is-disabled { opacity: .45; }
+.dsh-worldbook-root .wb-setting-field { min-width: 0; margin-top: 10px; }
+.dsh-worldbook-root .wb-settings-fields-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.dsh-worldbook-root .wb-segmented { display: flex; gap: 5px; flex-wrap: wrap; }
+.dsh-worldbook-root .wb-segmented .wb-btn { flex: 0 0 auto; min-width: 0; padding: 7px 11px; }
+.dsh-worldbook-root .wb-check-row { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 9px; cursor: pointer; color: var(--ml-ink); font-size: 13px; }
+.dsh-worldbook-root .wb-check-row:hover { background: var(--ml-pink-0); }
+.dsh-worldbook-root .wb-workspace-list { max-height: 170px; margin-top: 8px; padding: 4px; border: 1px solid var(--ml-line); border-radius: 11px; background: var(--ml-bg-card-solid); }
+.dsh-worldbook-root .wb-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 2px; }
+.dsh-worldbook-root .wb-settings-footer .wb-btn.primary { min-width: 112px; }
 .dsh-worldbook-root .wb-btn {
   border: 1px solid var(--ml-line); background: var(--ml-bg-card-solid); color: var(--ml-btn-text);
   border-radius: 12px; padding: 9px 14px; cursor: pointer; font: inherit;
@@ -371,6 +420,12 @@
 .dsh-worldbook-root .wbed-btn.primary { color: var(--ml-accent-text); border: 0; background: var(--ml-accent-grad); font-weight: 700; }
 .dsh-worldbook-root .wbed-foot { display: flex; align-items: center; justify-content: space-between; }
 @media (max-width: 780px) {
+  .dsh-worldbook-root .wb-settings-grid, .dsh-worldbook-root .wb-settings-fields-2 { grid-template-columns: 1fr; }
+  .dsh-worldbook-root .wb-settings-section:first-child, .dsh-worldbook-root .wb-settings-developer { grid-column: auto; }
+  .dsh-worldbook-root .wb-settings-section { padding: 13px; }
+  .dsh-worldbook-root .wb-settings-title { font-size: 19px; }
+  .dsh-worldbook-root .wb-settings-footer { align-items: stretch; flex-direction: column; }
+  .dsh-worldbook-root .wb-settings-footer .wb-btn.primary { width: 100%; }
   .dsh-worldbook-root .wbed-grid4, .dsh-worldbook-root .wbed-grid5, .dsh-worldbook-root .wbed-checks, .dsh-worldbook-root .wbed-sources { grid-template-columns: 1fr; }
   .dsh-worldbook-root .wbed-effect-grid { flex-direction: column; align-items: stretch; }
   .dsh-worldbook-root .wbed-effect-grid .wbed-field:nth-child(1),
@@ -379,6 +434,13 @@
   .dsh-worldbook-root .wbed-effect-grid .wbed-field:nth-child(4),
   .dsh-worldbook-root .wbed-effect-grid .wbed-field:nth-child(5) { width: 100%; }
   .dsh-worldbook-root .wbed-body { padding: 14px; }
+}
+
+@media (max-width: 480px) {
+  .dsh-worldbook-root .wb-settings-intro-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .dsh-worldbook-root .wb-settings-status { align-self: flex-start; }
+  .dsh-worldbook-root .wb-card-bd { padding: 14px; }
+  .dsh-worldbook-root .wb-settings-section-head span:not(.wb-settings-section-icon) { max-width: 230px; }
 }
 
 /* 减少动态效果偏好：关闭动画与过渡 */
