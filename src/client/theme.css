@@ -269,29 +269,31 @@
 .dsh-worldbook-root .wb-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 2px; }
 .dsh-worldbook-root .wb-settings-footer .wb-btn.primary { min-width: 112px; }
 .dsh-worldbook-root .wb-dev-floating-root { position: fixed; inset: 0; z-index: 940; pointer-events: none; }
-.dsh-worldbook-root .wb-dev-floating-button { position: fixed; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 7px; min-width: 48px; height: 42px; padding: 0 13px; border: 1px solid var(--ml-pink-5); border-radius: 99px; background: var(--ml-pink-6); box-shadow: 0 7px 18px rgb(100 35 64 / 22%); color: white; cursor: grab; pointer-events: auto; touch-action: none; transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease; }
-.dsh-worldbook-root .wb-dev-floating-button:hover { transform: translate(-50%, -50%) scale(1.04); background: var(--ml-pink-7); box-shadow: 0 9px 22px rgb(100 35 64 / 28%); }
+.dsh-worldbook-root .wb-dev-floating-button { position: fixed; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 7px; min-width: 48px; height: 42px; padding: 0 13px; border: 1px solid var(--ml-line); border-radius: 99px; background: var(--ml-bg-card-solid); box-shadow: var(--ml-shadow-mid); color: var(--ml-ink); cursor: grab; pointer-events: auto; touch-action: none; transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.dsh-worldbook-root .wb-dev-floating-button:hover { transform: translate(-50%, -50%) scale(1.04); background: var(--ml-bg-surface-hover); box-shadow: var(--ml-shadow-big); color: var(--ml-ink); }
 .dsh-worldbook-root .wb-dev-floating-button:active { cursor: grabbing; transform: translate(-50%, -50%) scale(.98); }
 .dsh-worldbook-root .wb-dev-floating-glyph { font-size: 17px; line-height: 1; }
 .dsh-worldbook-root .wb-dev-floating-label { font-size: 12px; font-weight: 750; white-space: nowrap; }
 .dsh-worldbook-root .wb-dev-floating-backdrop { position: fixed; inset: 0; background: rgb(38 25 31 / 18%); pointer-events: auto; }
-.dsh-worldbook-root .wb-dev-floating-window { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); backface-visibility: hidden; display: flex; flex-direction: column; width: min(620px, calc(100vw - 36px)); height: min(470px, calc(100vh - 36px)); overflow: hidden; border: 1px solid var(--ml-pink-3); border-radius: 14px; background: var(--ml-bg-card-solid); box-shadow: 0 18px 50px rgb(41 21 30 / 25%); }
+.dsh-worldbook-root .wb-dev-floating-window { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); backface-visibility: hidden; display: flex; flex-direction: column; width: min(620px, calc(100vw - 36px)); max-height: min(470px, calc(100vh - 36px)); overflow: hidden; border: 1px solid var(--ml-line); border-radius: 14px; background: var(--ml-bg-card-solid); box-shadow: var(--ml-shadow-big); isolation: isolate; }
+.dsh-worldbook-root .wb-dev-floating-window-chrome { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 44px; padding: 8px 14px; box-sizing: border-box; border-bottom: 1px solid var(--ml-line); background: var(--ml-bg-card-solid); color: var(--ml-ink); cursor: move; user-select: none; touch-action: none; }
+.dsh-worldbook-root .wb-dev-floating-window-chrome strong { font-size: 14px; font-weight: 700; line-height: 28px; }
 .dsh-worldbook-root .wb-dev-floating-window-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 8px 12px; border-bottom: 1px solid var(--ml-line); background: var(--ml-pink-0); cursor: move; user-select: none; touch-action: none; }
 .dsh-worldbook-root .wb-dev-floating-window-head strong { display: block; color: var(--ml-ink); font-size: 14px; }
 .dsh-worldbook-root .wb-dev-floating-window-head span { display: block; margin-top: 2px; color: var(--ml-ink-2); font-size: 11px; }
-.dsh-worldbook-root .wb-dev-floating-close { width: 30px; min-width: 30px; height: 30px; padding: 0; border-radius: 8px; font-size: 18px; line-height: 1; }
+.dsh-worldbook-root .wb-dev-floating-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; padding: 0; border: none; border-radius: 28px; background: transparent; color: var(--dsw-alias-label-primary, var(--ml-ink)); cursor: pointer; }
+.dsh-worldbook-root .wb-dev-floating-close:hover { background: var(--dsw-alias-interactive-bg-hover, var(--ml-bg-surface-hover)); }
 .dsh-worldbook-root .wb-dev-floating-window-body { min-height: 0; flex: 1; overflow: auto; padding: 0; }
-.dsh-worldbook-root .wb-dev-floating-window-body > .dsh-worldbook-root { min-height: 100%; }
-.dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-settings { min-height: 100%; padding: 9px 12px; background: var(--ml-bg-card-solid); }
+.dsh-worldbook-root .wb-dev-floating-window-body > .dsh-worldbook-root { min-height: 0; }
+.dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-settings { min-height: 0; padding: 9px 12px; background: var(--ml-bg-card-solid); }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section { display: flex; flex-direction: column; gap: 6px; }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section > .wb-settings-section-head { position: sticky; top: -1px; z-index: 4; padding: 7px 0; border-bottom: 1px solid var(--ml-line); background: var(--ml-bg-card-solid); }
-.dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section > .wb-settings-section-head { cursor: move; user-select: none; touch-action: none; }
+.dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section > .wb-settings-section-head { cursor: default; }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section .wb-dev-controls { margin-top: 0; gap: 7px; }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section .wb-setting-row { min-height: 38px; padding: 4px 0; }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section .wb-setting-field { margin-top: 6px; }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section .wb-perm-block { gap: 5px; padding: 6px 0; }
 .dsh-worldbook-root .wb-dev-floating-window-body .wb-dev-floating-section .wb-dev-target { margin-top: 5px !important; }
-.dsh-worldbook-root .wb-dev-floating-window > .wb-dev-floating-close { position: absolute; top: 9px; right: 10px; z-index: 2; }
 .dsh-worldbook-root .wb-btn {
   border: 1px solid var(--ml-line); background: var(--ml-bg-card-solid); color: var(--ml-btn-text);
   border-radius: 12px; padding: 9px 14px; cursor: pointer; font: inherit;
@@ -500,9 +502,9 @@
 }
 
 @media (max-width: 480px) {
-  .dsh-worldbook-root .wb-dev-floating-button { height: 38px; padding: 0 11px; }
-  .dsh-worldbook-root .wb-dev-floating-label { display: none; }
-  .dsh-worldbook-root .wb-dev-floating-window { width: calc(100vw - 20px); height: calc(100vh - 20px); }
+  .dsh-worldbook-root .wb-dev-floating-button { height: 38px; padding: 0 10px; gap: 5px; }
+  .dsh-worldbook-root .wb-dev-floating-label { font-size: 11px; }
+  .dsh-worldbook-root .wb-dev-floating-window { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
   .dsh-worldbook-root .wb-editor-toolbar-actions { align-items: stretch; flex-direction: column; }
   .dsh-worldbook-root .wb-editor-pager { justify-content: space-between; }
   .dsh-worldbook-root .wb-add-entry-btn { width: 100%; }

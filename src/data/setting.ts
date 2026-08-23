@@ -36,7 +36,7 @@ export interface SettingsDocument {
   injectMode: InjectMode
   devMode: boolean
   devFloating: boolean
-  devAction: 'create' | 'edit'
+  devAction: 'create' | 'edit' | 'global'
   devBookId: string
   devEntryIds: string[]
   devPerms: DevPerm[]
@@ -91,7 +91,7 @@ export function saveSettings(input: SettingsDocument): SettingsDocument {
     workspaceMode: input.workspaceMode === 'selected' ? 'selected' : 'all',
     workspaceIds: Array.from(new Set(input.workspaceIds.filter((x): x is string => typeof x === 'string'))),
     injectMode: input.injectMode === 'every-step' ? 'every-step' : 'per-turn',
-    devAction: input.devAction === 'edit' ? 'edit' : 'create',
+    devAction: input.devAction === 'edit' ? 'edit' : input.devAction === 'global' ? 'global' : 'create',
     devEntryIds: Array.from(new Set(input.devEntryIds.filter((x): x is string => typeof x === 'string'))),
     devPerms: Array.from(new Set(input.devPerms.filter((x): x is DevPerm => ALL_PERMS.includes(x)))),
   }
@@ -181,11 +181,14 @@ export function setDevFloating(value: boolean): void {
 }
 
 // 开发模式动作：create=新建（AI 可新建世界书并编辑全部条目）；edit=编辑（AI 编辑指定世界书的指定条目）
-export function devAction(): 'create' | 'edit' {
-  return get('devAction') === 'edit' ? 'edit' : 'create'
+export function devAction(): 'create' | 'edit' | 'global' {
+  const raw = get('devAction')
+  if (raw === 'edit') return 'edit'
+  if (raw === 'global') return 'global'
+  return 'create'
 }
 
-export function setDevAction(value: 'create' | 'edit'): void {
+export function setDevAction(value: 'create' | 'edit' | 'global'): void {
   set('devAction', value, 'general')
 }
 
@@ -293,7 +296,33 @@ export function setWorkspaceScope(mode: WorkspaceMode, ids: string[]): void {
   set('workspaceIds', JSON.stringify(Array.from(new Set(ids))), 'general')
 }
 
-// 判定：给定当前所在工作区 id，插件是否在该工作区生效。
+// ── 新建模式下 AI 新建的世界书白名单（持久化，Survives plugin re-registration & session restarts) ──
+const DEV_CREATED_BOOKS_KEY = 'devCreatedBookIds'
+
+export function devCreatedBooks(): Set<string> {
+  try {
+    const raw = get(DEV_CREATED_BOOKS_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+export function addDevCreatedBook(bookId: string): void {
+  const books = devCreatedBooks()
+  books.add(bookId)
+  set(DEV_CREATED_BOOKS_KEY, JSON.stringify([...books]), 'dev')
+}
+
+export function removeDevCreatedBook(bookId: string): void {
+  const books = devCreatedBooks()
+  books.delete(bookId)
+  set(DEV_CREATED_BOOKS_KEY, JSON.stringify([...books]), 'dev')
+}
+
+// ── 判定：给定当前所在工作区 id，插件是否在该工作区生效。 ──
 // 规则：总开关关闭 → 全局失效；开启后按 全部/指定 工作区过滤。
 export function isActive(workspaceId: string | undefined): boolean {
   if (!enabled()) return false

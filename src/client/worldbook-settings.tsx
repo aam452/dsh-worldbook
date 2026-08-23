@@ -32,7 +32,7 @@ interface SettingsRecord {
   injectMode: 'per-turn' | 'every-step'
   devMode: boolean
   devFloating: boolean
-  devAction: 'create' | 'edit'
+  devAction: 'create' | 'edit' | 'global'
   devBookId: string
   devEntryIds: string[]
   devPerms: string[]
@@ -89,7 +89,7 @@ const EntryCard = memo(function EntryCard({ entry, on, onToggle }: { entry: StWo
 // 世界书插件设置表单：启用开关 + 工作区作用域 + 主题 + 开发模式（含 AI 权限）。
 // variant='dialog'：模态框外壳（世界书页顶部「设置」按钮打开）；
 // variant='card'：内嵌卡片外壳（宿主设置页内嵌，无关闭按钮）。表单逻辑两形态完全一致。
-export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog', developerOnly = false, hideDevToggles = false, onDeveloperPointerDown }: { workspaces?: WorkspacesService; onClose?: () => void; variant?: 'dialog' | 'card' | 'developer'; developerOnly?: boolean; hideDevToggles?: boolean; onDeveloperPointerDown?: (event: unknown) => void }) {
+export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog', developerOnly = false, hideDevToggles = false, hideDeveloperHeader = false, onDeveloperPointerDown }: { workspaces?: WorkspacesService; onClose?: () => void; variant?: 'dialog' | 'card' | 'developer'; developerOnly?: boolean; hideDevToggles?: boolean; hideDeveloperHeader?: boolean; onDeveloperPointerDown?: (event: unknown) => void }) {
   const [loaded, setLoaded] = useState<SettingsRecord | null>(null)
   const [editable, setEditable] = useState<SettingsRecord | null>(null)
   const [saved, setSaved] = useState(false)
@@ -240,7 +240,7 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
         h('div', { className: 'wb-pick-row' },
           h('div', { className: 'wb-search' }, h('input', { type: 'text', className: 'wb-input', placeholder: '搜索世界书…', value: bookSearch, onChange: (e: { target: { value: string } }) => setBookSearch(e.target.value) })),
           h('div', { style: { flex: 1, minWidth: 0 } },
-            h('select', { className: 'wb-select', style: { width: '100%', minHeight: 40 }, value: devBookId, onChange: (e: { target: { value: string } }) => { patch({ devBookId: e.target.value }); setEntrySearch('') } },
+            h('select', { className: 'wb-select', style: { width: '100%', minHeight: 40 }, value: devBookId, onChange: (e: { target: { value: string } }) => { patch({ devBookId: e.target.value, devEntryIds: [] }); setEntrySearch('') } },
               filteredBooks.length === 0 ? h('option', { value: '' }, '没有匹配的世界书') : [h('option', { key: '', value: '' }, '请选择世界书…'), ...filteredBooks.map((b) => h('option', { key: b.id, value: b.id }, `${b.name}（${b.entryCount} 条目${b.enabled ? '' : ' · 未启用'}）`))],
             ),
           ),
@@ -264,7 +264,7 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
           h('div', { className: 'wb-entry-grid', style: { display: 'grid', gap: 8, overflowY: 'auto' } }, devEntriesLoading ? h('div', { className: 'wb-hint' }, '加载中…') : devBookEntries.length === 0 ? h('div', { className: 'wb-hint' }, '该世界书还没有条目。') : devBookEntries.map((entry) => h(EntryCard, { key: entry.id, entry, on: devEntries.includes(entry.id), onToggle: toggleDevEntry }))),
         ) : null,
       )
-    : devModeOn ? h('div', { className: 'wb-hint' }, '新建模式') : null
+    : devModeOn && devAction === 'global' ? h('div', { className: 'wb-hint' }, '全域模式：AI 可编辑全部世界书，仅遵守 AI 权限设置') : devModeOn ? h('div', { className: 'wb-hint' }, '新建模式') : null
 
   // AI 权限多选区块（增删改查；默认全选，不做一键全选/清空，用户手动逐项勾选）
   function permBlock() {
@@ -302,13 +302,13 @@ export function WorldbookSettingsDialog({ workspaces, onClose, variant = 'dialog
   }
 
   const developerSection = (forceExpanded = false, flat = false) => h('section', { className: flat ? 'wb-dev-floating-section' : 'wb-settings-section wb-settings-developer' },
-    h('div', { className: 'wb-settings-section-head' + (forceExpanded ? '' : ' wb-settings-section-toggle'), role: forceExpanded ? undefined : 'button', tabIndex: forceExpanded ? undefined : 0, 'aria-expanded': forceExpanded || devExpanded, onPointerDown: forceExpanded ? onDeveloperPointerDown : undefined, onClick: forceExpanded ? undefined : () => setDevExpanded((value) => !value), onKeyDown: forceExpanded ? undefined : (e: { key: string }) => { if (e.key === 'Enter' || e.key === ' ') setDevExpanded((value) => !value) } }, h('span', { className: 'wb-settings-section-icon' }, '✦'), h('div', null, h('strong', null, '开发模式'), h('span', null, '为 AI 提供受控的世界书编辑能力')), forceExpanded ? null : h('span', { className: 'wb-settings-chevron' + (devExpanded ? ' is-open' : '') }, '⌄')),
+    hideDeveloperHeader ? null : h('div', { className: 'wb-settings-section-head' + (forceExpanded ? '' : ' wb-settings-section-toggle'), role: forceExpanded ? undefined : 'button', tabIndex: forceExpanded ? undefined : 0, 'aria-expanded': forceExpanded || devExpanded, onPointerDown: forceExpanded ? onDeveloperPointerDown : undefined, onClick: forceExpanded ? undefined : () => setDevExpanded((value) => !value), onKeyDown: forceExpanded ? undefined : (e: { key: string }) => { if (e.key === 'Enter' || e.key === ' ') setDevExpanded((value) => !value) } }, h('span', { className: 'wb-settings-section-icon' }, '✦'), h('div', null, h('strong', null, '开发模式'), h('span', null, '为 AI 提供受控的世界书编辑能力')), forceExpanded ? null : h('span', { className: 'wb-settings-chevron' + (devExpanded ? ' is-open' : '') }, '⌄')),
     (forceExpanded || devExpanded) ? h('div', null,
       hideDevToggles ? null : h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '开发模式'), h('div', { className: 'wb-hint' }, '仅在需要 AI 编辑世界书时开启')), h('div', { className: 'wb-switch' + (devModeOn ? '' : ' off'), onClick: () => patch({ devMode: !devModeOn }) })),
       devModeOn ? h('div', { className: 'wb-dev-controls' },
         hideDevToggles ? null : h('div', { className: 'wb-setting-row' }, h('div', null, h('div', { className: 'wb-name' }, '悬浮窗')), h('div', { className: 'wb-switch' + (settings.devFloating ? '' : ' off'), onClick: () => patch({ devFloating: !settings.devFloating }) })),
         permBlock(),
-        h('div', { className: 'wb-setting-field' }, h('div', { className: 'wb-field-label' }, '编辑方式'), h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (devAction === 'create' ? ' active' : ''), onClick: () => patch({ devAction: 'create' }) }, '新建'), h('button', { className: 'wb-btn' + (devAction === 'edit' ? ' active' : ''), onClick: () => patch({ devAction: 'edit' }) }, '编辑'))),
+         h('div', { className: 'wb-setting-field' }, h('div', { className: 'wb-field-label' }, '权限模式'), h('div', { className: 'wb-segmented' }, h('button', { className: 'wb-btn' + (devAction === 'create' ? ' active' : ''), onClick: () => patch({ devAction: 'create', devEntryIds: [] }) }, '新建'), h('button', { className: 'wb-btn' + (devAction === 'edit' ? ' active' : ''), onClick: () => patch({ devAction: 'edit', devEntryIds: [] }) }, '编辑'), h('button', { className: 'wb-btn' + (devAction === 'global' ? ' active' : ''), onClick: () => patch({ devAction: 'global', devEntryIds: [] }) }, '全域'))),
       ) : null,
       devTargetView,
     ) : null,

@@ -10,6 +10,7 @@
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createElement as h } from 'react'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
@@ -167,16 +168,19 @@ function WorldbookDevFloating({ workspaces, sessions }: { workspaces?: Workspace
   return h('div', { className: 'wb-dev-floating-root' },
     h('button', {
       className: 'wb-dev-floating-button',
-      title: '打开世界书开发窗口',
-      'aria-label': '打开世界书开发窗口',
+      title: '打开开发模式窗口',
+      'aria-label': '打开开发模式窗口',
       style: { left: `${position.leftPct}%`, top: `${position.topPct}%` },
       onPointerDown,
       onClick: () => { if (!dragged.current) setOpen(true) },
-    }, h('span', { className: 'wb-dev-floating-glyph' }, '✦'), h('span', { className: 'wb-dev-floating-label' }, '世界书')),
+    }, h('span', { className: 'wb-dev-floating-glyph' }, '✦'), h('span', { className: 'wb-dev-floating-label' }, '开发模式')),
     open ? h('div', { className: 'wb-dev-floating-backdrop', onClick: () => setOpen(false) },
         h('div', { className: 'wb-dev-floating-window', role: 'dialog', 'aria-label': '开发模式设置', style: { transform: `translate3d(calc(-50% + ${windowOffset.current.x}px), calc(-50% + ${windowOffset.current.y}px), 0)` }, onClick: (e: { stopPropagation: () => void }) => e.stopPropagation() },
-        h('button', { className: 'wb-btn wb-dev-floating-close', onPointerDown: (e: { stopPropagation: () => void }) => e.stopPropagation(), onClick: () => setOpen(false), title: '关闭' }, '×'),
-        h('div', { className: 'wb-dev-floating-window-body' }, h(WorldbookSettingsDialog, { workspaces, variant: 'developer', developerOnly: true, hideDevToggles: true, onDeveloperPointerDown: (event: unknown) => onWindowPointerDown(event as Parameters<typeof onWindowPointerDown>[0]) })),
+        h('div', { className: 'wb-dev-floating-window-chrome', onPointerDown: (event: unknown) => onWindowPointerDown(event as Parameters<typeof onWindowPointerDown>[0]) },
+          h('strong', null, '开发模式'),
+          h('button', { type: 'button', className: 'wb-dev-floating-close', onPointerDown: (e: { stopPropagation: () => void }) => e.stopPropagation(), onClick: () => setOpen(false), 'aria-label': '关闭' }, h(IconCloseOutline16, { size: 14 })),
+        ),
+        h('div', { className: 'wb-dev-floating-window-body' }, h(WorldbookSettingsDialog, { workspaces, variant: 'developer', developerOnly: true, hideDevToggles: true, hideDeveloperHeader: true })),
       ),
     ) : null,
   )
