@@ -53,21 +53,34 @@ interface FloatingSettings {
 
 const FLOATING_POSITION_KEY = 'dsh-worldbook-dev-floating-position'
 
-function readFloatingPosition(): { leftPct: number; topPct: number } {
+interface PersistedFloatingPosition {
+  leftPct: number
+  topPct: number
+  windowX: number
+  windowY: number
+}
+
+function readFloatingPosition(): PersistedFloatingPosition {
   try {
-    const parsed = JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) ?? 'null') as { leftPct?: number; topPct?: number } | null
-    if (parsed && typeof parsed.leftPct === 'number' && typeof parsed.topPct === 'number') {
-      return { leftPct: Math.min(100, Math.max(0, parsed.leftPct)), topPct: Math.min(100, Math.max(0, parsed.topPct)) }
+    const parsed = JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) ?? 'null') as Partial<PersistedFloatingPosition> | null
+    if (parsed && typeof parsed.leftPct === 'number' && typeof parsed.topPct === 'number' && typeof parsed.windowX === 'number' && typeof parsed.windowY === 'number') {
+      return {
+        leftPct: Math.min(100, Math.max(0, parsed.leftPct)),
+        topPct: Math.min(100, Math.max(0, parsed.topPct)),
+        windowX: parsed.windowX,
+        windowY: parsed.windowY,
+      }
     }
   } catch { /* 本地存储不可用时使用默认位置 */ }
-  return { leftPct: 92, topPct: 76 }
+  return { leftPct: 92, topPct: 76, windowX: 0, windowY: 0 }
 }
 
 function WorldbookDevFloating({ workspaces, sessions }: { workspaces?: WorkspacesService; sessions?: SessionsService }) {
   const [settings, setSettings] = useState<FloatingSettings | null>(null)
   const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState(readFloatingPosition)
-  const windowOffset = useRef({ x: 0, y: 0 })
+  const initialPosition = readFloatingPosition()
+  const [position, setPosition] = useState(initialPosition)
+  const windowOffset = useRef({ x: initialPosition.windowX, y: initialPosition.windowY })
   const dragged = useRef(false)
 
   useEffect(() => {
@@ -77,6 +90,13 @@ function WorldbookDevFloating({ workspaces, sessions }: { workspaces?: Workspace
     window.addEventListener('dsh-worldbook-data-changed', load)
     return () => { alive = false; window.removeEventListener('dsh-worldbook-data-changed', load) }
   }, [])
+
+  function persistWindowOffset() {
+    try {
+      const current = JSON.parse(localStorage.getItem(FLOATING_POSITION_KEY) ?? '{}')
+      localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify({ ...current, windowX: windowOffset.current.x, windowY: windowOffset.current.y }))
+    } catch { /* 本地存储不可用时忽略 */ }
+  }
 
   useEffect(() => {
     try { localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify(position)) } catch { /* 本地存储不可用时忽略 */ }
@@ -99,6 +119,7 @@ function WorldbookDevFloating({ workspaces, sessions }: { workspaces?: Workspace
       if (!moved && Math.hypot(dx, dy) > 5) moved = true
       if (moved) {
         setPosition({
+          ...startPosition,
           leftPct: Math.min(100, Math.max(0, startPosition.leftPct + dx / window.innerWidth * 100)),
           topPct: Math.min(100, Math.max(0, startPosition.topPct + dy / window.innerHeight * 100)),
         })
@@ -157,6 +178,7 @@ function WorldbookDevFloating({ workspaces, sessions }: { workspaces?: Workspace
       try { header.releasePointerCapture(e.pointerId) } catch { /* 指针已释放 */ }
       if (moved) {
         windowOffset.current = finalOffset
+        persistWindowOffset()
       }
       windowEl.style.willChange = 'auto'
     }
